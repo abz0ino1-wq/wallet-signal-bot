@@ -22,6 +22,13 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
 
   const ethTokens = [...latest, ...top].filter((t) => t.chainId === "ethereum");
   const seen = new Set<string>();
+  let skippedMcap = 0;
+  let skippedLiquidity = 0;
+  let skippedSafety = 0;
+
+  logger.info(
+    `Hot tokens: fetched ${latest.length} latest-boosted + ${top.length} top-boosted (${ethTokens.length} on ethereum).`
+  );
 
   for (const boosted of ethTokens) {
     const address = boosted.tokenAddress.toLowerCase();
@@ -33,11 +40,18 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
       const marketCapUsd = pair?.marketCap ?? pair?.fdv ?? null;
       const liquidityUsd = pair?.liquidity?.usd ?? null;
 
-      if (!marketCapUsd || marketCapUsd > config.thresholds.maxMarketCapUsd) continue;
-      if (!liquidityUsd || liquidityUsd < config.thresholds.minLiquidityUsd) continue;
+      if (!marketCapUsd || marketCapUsd > config.thresholds.maxMarketCapUsd) {
+        skippedMcap++;
+        continue;
+      }
+      if (!liquidityUsd || liquidityUsd < config.thresholds.minLiquidityUsd) {
+        skippedLiquidity++;
+        continue;
+      }
 
       const safety = await getTokenSafety(address);
       if (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore) {
+        skippedSafety++;
         logger.info(`Hot tokens: skipping ${address} (safety score ${safety.score}: ${safety.reasons.join(",")})`);
         continue;
       }
@@ -62,6 +76,8 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
     }
   }
 
-  logger.info(`Hot tokens refreshed: ${hot.size} dex-paid low-mcap token(s) passing filters.`);
+  logger.info(
+    `Hot tokens refreshed: ${hot.size} passing filters (skipped: ${skippedMcap} mcap, ${skippedLiquidity} liquidity, ${skippedSafety} safety).`
+  );
   return hot;
 }

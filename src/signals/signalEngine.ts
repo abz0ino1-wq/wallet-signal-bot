@@ -82,10 +82,16 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
       safetyScore: null,
       lastCheckedAt: Date.now(),
     });
+    logger.info(`New pair tracked: ${candidate} (${ev.dex}, initial mcap ${initialMarketCapUsd ?? "unknown"}).`);
   });
 
+  let mempoolBuyCount = 0;
   const stopMempoolWatcher = startMempoolWatcher((swap) => {
     if (swap.side !== "buy") return;
+    mempoolBuyCount++;
+    if (mempoolBuyCount % 50 === 0) {
+      logger.info(`Mempool watcher: ${mempoolBuyCount} router buys seen so far (most won't match a signal yet).`);
+    }
 
     const isSmartMoney = smartMoney.has(swap.trader);
     const hotToken = hotTokens.get(swap.tokenAddress);
