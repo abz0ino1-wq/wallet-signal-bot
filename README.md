@@ -49,7 +49,10 @@ Separately, on a cron schedule:
 - **`new_dex_paid_low_mcap`** — a token just started paying for Dexscreener
   boost/visibility, sits inside your market-cap band (`MIN_MARKET_CAP_USD`–
   `MAX_MARKET_CAP_USD`, default $3k–$10k), has enough liquidity and 24h
-  volume (`MIN_VOLUME_USD`), and passed a ScanHood honeypot/scam check.
+  volume (`MIN_VOLUME_USD`), is still under `MAX_TOKEN_AGE_HOURS` (default
+  6h — a token can launch, sit for a day, then start paying for a boost;
+  this keeps the signal about fresh tokens, not just currently-boosted
+  ones), and passed a ScanHood honeypot/scam check.
 - **`hot_token_buy`** — real-time buy pressure on a token already on the
   hot list above.
 - **`fresh_pair`** — a brand-new Uniswap pool just went live (checked ~15s

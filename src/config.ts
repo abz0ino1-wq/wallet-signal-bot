@@ -65,6 +65,12 @@ export const config = {
     minVolumeUsd: envInt("MIN_VOLUME_USD", 1_000),
     minSafetyScore: envInt("MIN_SAFETY_SCORE", 60),
     minWalletScore: envInt("MIN_WALLET_SCORE", 60),
+    // "Dex paid" only cares about current boost status, not launch date --
+    // a token can sit for hours/days then start paying for visibility. This
+    // caps how old a token's pair is allowed to be for that signal, so
+    // "new_dex_paid_low_mcap"/hot_token_buy stay about genuinely fresh
+    // tokens rather than just currently-boosted ones.
+    maxTokenAgeHours: envInt("MAX_TOKEN_AGE_HOURS", 6),
     // Separate (lower) bar for brand-new pairs: a token seconds old won't yet
     // have the liquidity/volume an established "hot" token would.
     minFreshPairLiquidityUsd: envInt("MIN_FRESH_PAIR_LIQUIDITY_USD", 2_000),
