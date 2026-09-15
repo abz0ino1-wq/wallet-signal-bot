@@ -69,7 +69,8 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
       const safety = await getTokenSafety(address);
       if (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore) {
         skippedSafety++;
-        logger.info(`Hot tokens: skipping ${address} (safety score ${safety.score}: ${safety.reasons.join(",")})`);
+        const note = safety.unverifiable ? "not yet verifiable, will recheck next refresh" : safety.reasons.join(",");
+        logger.info(`Hot tokens: skipping ${address} (safety score ${safety.score}: ${note})`);
         continue;
       }
 

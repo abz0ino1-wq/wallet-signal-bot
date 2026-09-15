@@ -64,14 +64,23 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
 
   const pendingFreshPairChecks = new Set<ReturnType<typeof setTimeout>>();
 
+  const FRESH_PAIR_MAX_RETRIES = 3;
+  const FRESH_PAIR_RETRY_DELAY_MS = 60_000;
+
   /**
    * "GMGN-style" fresh-listing signal: fires once a brand-new pair has real
    * liquidity and passes a basic safety check. Runs on a delay after
    * creation because Dexscreener typically hasn't indexed a pool in the
    * first few seconds -- this is still "early" relative to when a human
    * would notice a new listing, just not the very first block.
+   *
+   * ScanHood often can't run its sell simulation on a token this fresh (no
+   * trading history yet) and returns CAUTION purely for that reason --
+   * `unverifiable` distinguishes that from an actually-risky CAUTION, and
+   * gets retried a few times as the pool matures rather than treated as a
+   * permanent rejection.
    */
-  async function checkFreshPair(candidate: string, ev: NewPairEvent) {
+  async function checkFreshPair(candidate: string, ev: NewPairEvent, attempt = 0) {
     try {
       const pair = await getBestPair(config.chain.name, candidate);
       const marketCapUsd = pair?.marketCap ?? pair?.fdv ?? null;
@@ -79,6 +88,15 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
       if (!liquidityUsd || liquidityUsd < config.thresholds.minFreshPairLiquidityUsd) return;
 
       const safety = await getTokenSafety(candidate);
+      if (safety.unverifiable && attempt < FRESH_PAIR_MAX_RETRIES) {
+        logger.info(`Fresh pair: ${candidate} not yet verifiable by ScanHood, retrying in 60s (attempt ${attempt + 1}/${FRESH_PAIR_MAX_RETRIES}).`);
+        const timer = setTimeout(() => {
+          pendingFreshPairChecks.delete(timer);
+          checkFreshPair(candidate, ev, attempt + 1);
+        }, FRESH_PAIR_RETRY_DELAY_MS);
+        pendingFreshPairChecks.add(timer);
+        return;
+      }
       if (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore) {
         logger.info(`Fresh pair: skipping ${candidate} (safety score ${safety.score}: ${safety.reasons.join(",")})`);
         return;

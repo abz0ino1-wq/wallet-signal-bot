@@ -8,6 +8,10 @@ export interface TokenSafety {
   isHoneypot: boolean;
   buyTaxPct: number;
   sellTaxPct: number;
+  // True when the only reason this isn't PASS is that ScanHood couldn't run
+  // its sell simulation yet (too new / no pool), not an actual risk flag --
+  // callers should retry later rather than treat this as "verified risky."
+  unverifiable: boolean;
 }
 
 interface ScanHoodResponse {
@@ -60,7 +64,14 @@ export async function getTokenSafety(tokenAddress: string): Promise<TokenSafety>
 
     if (typeof data.verdict !== "string") {
       logger.warn(`ScanHood: unrecognized response shape for ${tokenAddress}: ${JSON.stringify(data).slice(0, 200)}`);
-      return { score: 0, reasons: ["scanhood_unverifiable"], isHoneypot: true, buyTaxPct: 0, sellTaxPct: 0 };
+      return {
+        score: 0,
+        reasons: ["scanhood_unverifiable"],
+        isHoneypot: true,
+        buyTaxPct: 0,
+        sellTaxPct: 0,
+        unverifiable: true,
+      };
     }
 
     const verdict = data.verdict.toUpperCase();
@@ -78,11 +89,25 @@ export async function getTokenSafety(tokenAddress: string): Promise<TokenSafety>
 
     score = Math.max(0, Math.min(100, score));
 
+    // A CAUTION verdict purely because the sell simulation couldn't run yet
+    // (too new / no pool) isn't "verified risky" -- it's "untested," and
+    // deserves a retry once the pool has some real activity, not a
+    // permanent rejection.
+    const couldNotSimulate = reasons.some((r) => /could not simulate a sell/i.test(r));
+    const unverifiable = couldNotSimulate && !isHoneypot && verdict !== "DANGER";
+
     // ScanHood's docs don't expose buy/sell tax as separate fields (unlike
     // GoPlus) -- taxes would show up as CAUTION/DANGER flags instead.
-    return { score, reasons, isHoneypot, buyTaxPct: 0, sellTaxPct: 0 };
+    return { score, reasons, isHoneypot, buyTaxPct: 0, sellTaxPct: 0, unverifiable };
   } catch (err) {
     logger.warn(`ScanHood: request failed for ${tokenAddress}: ${(err as Error).message}`);
-    return { score: 0, reasons: ["scanhood_unreachable"], isHoneypot: true, buyTaxPct: 0, sellTaxPct: 0 };
+    return {
+      score: 0,
+      reasons: ["scanhood_unreachable"],
+      isHoneypot: true,
+      buyTaxPct: 0,
+      sellTaxPct: 0,
+      unverifiable: true,
+    };
   }
 }
