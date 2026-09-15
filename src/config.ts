@@ -54,12 +54,19 @@ export const config = {
     path: process.env.DB_PATH || "./data/wallet-signal-bot.sqlite",
   },
   thresholds: {
-    maxMarketCapUsd: envInt("MAX_MARKET_CAP_USD", 1_000_000),
+    // "Dex paid" hot-token band: $3k-$10k market cap by default -- tight on
+    // purpose, this is meant to catch tokens while they're still genuinely
+    // small, not just "under some large ceiling."
+    minMarketCapUsd: envInt("MIN_MARKET_CAP_USD", 3_000),
+    maxMarketCapUsd: envInt("MAX_MARKET_CAP_USD", 10_000),
     minLiquidityUsd: envInt("MIN_LIQUIDITY_USD", 5_000),
+    // "Good volume": require real trading activity, not just a quiet pool
+    // that happens to sit in the market-cap band.
+    minVolumeUsd: envInt("MIN_VOLUME_USD", 1_000),
     minSafetyScore: envInt("MIN_SAFETY_SCORE", 60),
     minWalletScore: envInt("MIN_WALLET_SCORE", 60),
     // Separate (lower) bar for brand-new pairs: a token seconds old won't yet
-    // have the liquidity an established "hot" token would.
+    // have the liquidity/volume an established "hot" token would.
     minFreshPairLiquidityUsd: envInt("MIN_FRESH_PAIR_LIQUIDITY_USD", 2_000),
   },
   freshPair: {

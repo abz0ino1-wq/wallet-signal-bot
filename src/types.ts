@@ -77,6 +77,7 @@ export interface DexscreenerPair {
   quoteToken: { address: string; name: string; symbol: string };
   priceUsd?: string;
   liquidity?: { usd?: number };
+  volume?: { h24?: number; h6?: number; h1?: number; m5?: number };
   fdv?: number;
   marketCap?: number;
   pairCreatedAt?: number;

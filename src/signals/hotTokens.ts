@@ -7,10 +7,10 @@ import { logger } from "../utils/logger";
 
 /**
  * "Dex paid" + low-market-cap token watchlist: pulls Dexscreener's boosted
- * (paid-promotion) token feed, filters to this chain's tokens under the
- * configured market-cap/liquidity thresholds, and screens out obvious
- * scams/honeypots via ScanHood before a token is considered "hot" (i.e.
- * eligible to trigger signals).
+ * (paid-promotion) token feed, filters to this chain's tokens inside the
+ * configured market-cap band with real liquidity and 24h volume, and
+ * screens out obvious scams/honeypots via ScanHood before a token is
+ * considered "hot" (i.e. eligible to trigger signals).
  */
 export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
   const hot = new Map<string, TokenRecord>();
@@ -24,6 +24,7 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
   const seen = new Set<string>();
   let skippedMcap = 0;
   let skippedLiquidity = 0;
+  let skippedVolume = 0;
   let skippedSafety = 0;
 
   logger.info(
@@ -39,13 +40,18 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
       const pair = await getBestPair(config.chain.name, address);
       const marketCapUsd = pair?.marketCap ?? pair?.fdv ?? null;
       const liquidityUsd = pair?.liquidity?.usd ?? null;
+      const volumeUsd = pair?.volume?.h24 ?? null;
 
-      if (!marketCapUsd || marketCapUsd > config.thresholds.maxMarketCapUsd) {
+      if (!marketCapUsd || marketCapUsd < config.thresholds.minMarketCapUsd || marketCapUsd > config.thresholds.maxMarketCapUsd) {
         skippedMcap++;
         continue;
       }
       if (!liquidityUsd || liquidityUsd < config.thresholds.minLiquidityUsd) {
         skippedLiquidity++;
+        continue;
+      }
+      if (!volumeUsd || volumeUsd < config.thresholds.minVolumeUsd) {
+        skippedVolume++;
         continue;
       }
 
@@ -77,7 +83,7 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
   }
 
   logger.info(
-    `Hot tokens refreshed: ${hot.size} passing filters (skipped: ${skippedMcap} mcap, ${skippedLiquidity} liquidity, ${skippedSafety} safety).`
+    `Hot tokens refreshed: ${hot.size} passing filters (skipped: ${skippedMcap} mcap, ${skippedLiquidity} liquidity, ${skippedVolume} volume, ${skippedSafety} safety).`
   );
   return hot;
 }

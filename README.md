@@ -47,8 +47,9 @@ Separately, on a cron schedule:
 - **`smart_money_buy`** — a wallet with a track record of profitable early
   entries just bought something (a confirmed on-chain swap).
 - **`new_dex_paid_low_mcap`** — a token just started paying for Dexscreener
-  boost/visibility, is under your market-cap ceiling, has enough liquidity,
-  and passed a ScanHood honeypot/scam check.
+  boost/visibility, sits inside your market-cap band (`MIN_MARKET_CAP_USD`–
+  `MAX_MARKET_CAP_USD`, default $3k–$10k), has enough liquidity and 24h
+  volume (`MIN_VOLUME_USD`), and passed a ScanHood honeypot/scam check.
 - **`hot_token_buy`** — real-time buy pressure on a token already on the
   hot list above.
 - **`fresh_pair`** — a brand-new Uniswap pool just went live (checked ~15s
