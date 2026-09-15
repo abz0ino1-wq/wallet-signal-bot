@@ -83,7 +83,11 @@ export async function getTokenSafety(tokenAddress: string): Promise<TokenSafety>
     const lpStatus = (data.lp?.status ?? data.lp_status ?? "").toLowerCase();
     const lpLocked = data.lp?.locked ?? (lpStatus ? lpStatus.includes("lock") : null);
     if (lpLocked === false) {
-      score -= 15;
+      // An unlocked LP means the deployer can pull liquidity at will --
+      // the single biggest rug-pull vector on this chain. Treat it as an
+      // automatic fail rather than a deduction: a PASS verdict with an
+      // unlocked LP is not actually safe.
+      score = 0;
       reasons.push("lp_not_locked");
     }
 
@@ -92,9 +96,14 @@ export async function getTokenSafety(tokenAddress: string): Promise<TokenSafety>
     // A CAUTION verdict purely because the sell simulation couldn't run yet
     // (too new / no pool) isn't "verified risky" -- it's "untested," and
     // deserves a retry once the pool has some real activity, not a
-    // permanent rejection.
+    // permanent rejection. But that only applies when the sell-simulation
+    // gap is the ONLY flag -- if it's bundled with a real risk flag (e.g.
+    // lp_not_locked), that other flag is a genuine finding, not a testing
+    // gap, so it must still block rather than getting waved through with a
+    // warning.
     const couldNotSimulate = reasons.some((r) => /could not simulate a sell/i.test(r));
-    const unverifiable = couldNotSimulate && !isHoneypot && verdict !== "DANGER";
+    const onlyUnsimulatable = reasons.every((r) => /could not simulate a sell/i.test(r));
+    const unverifiable = couldNotSimulate && onlyUnsimulatable && !isHoneypot && verdict !== "DANGER";
 
     // ScanHood's docs don't expose buy/sell tax as separate fields (unlike
     // GoPlus) -- taxes would show up as CAUTION/DANGER flags instead.

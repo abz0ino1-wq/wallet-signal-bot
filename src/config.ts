@@ -72,8 +72,10 @@ export const config = {
     // tokens rather than just currently-boosted ones.
     maxTokenAgeHours: envInt("MAX_TOKEN_AGE_HOURS", 6),
     // Separate (lower) bar for brand-new pairs: a token seconds old won't yet
-    // have the liquidity/volume an established "hot" token would.
-    minFreshPairLiquidityUsd: envInt("MIN_FRESH_PAIR_LIQUIDITY_USD", 2_000),
+    // have the liquidity/volume an established "hot" token would. Kept above
+    // a trivially-fakeable floor -- a pool seeded with only ~$2k liquidity is
+    // cheap enough that dead/throwaway launches routinely cleared it too.
+    minFreshPairLiquidityUsd: envInt("MIN_FRESH_PAIR_LIQUIDITY_USD", 5_000),
     // Hard ceiling for fresh_pair specifically: the whole point is catching
     // a token while it's still small. Some tokens on this chain pump 10-50x
     // within seconds of launch -- once a token is past this, alerting on it

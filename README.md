@@ -69,6 +69,27 @@ Separately, on a cron schedule:
 - **`composite`** — both at once (smart wallet buying a hot low-cap token) —
   highest-confidence signal.
 
+### Safety filtering
+
+Every signal type runs through ScanHood before it can fire:
+
+- A real **DANGER**/honeypot verdict, or a low safety score, blocks the
+  token outright.
+- An **unlocked LP** is treated as an automatic fail regardless of anything
+  else ScanHood reports — it means the deployer can pull liquidity at will,
+  the single biggest rug-pull vector on this chain.
+- ScanHood sometimes can't run its sell simulation at all (common on V4
+  pools, not just brand-new ones). That alone doesn't block — it gets
+  retried, and if still unresolved the token is let through flagged
+  **⚠️ UNVERIFIED** rather than hidden forever. But that only applies when
+  the sell-simulation gap is the *only* issue — if it's bundled with a real
+  risk flag (like the unlocked-LP case above), that flag still blocks. An
+  unverifiable result never overrides an actual finding.
+
+`MIN_FRESH_PAIR_LIQUIDITY_USD` (default $5k) is kept above a trivially
+fakeable floor — a pool seeded with only ~$2k in liquidity is cheap enough
+that dead, going-nowhere launches routinely cleared it too.
+
 ### Call tracking (follow-up alerts)
 
 Every time a signal fires for a token, its market cap at that moment is
