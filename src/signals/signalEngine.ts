@@ -111,9 +111,21 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
   const smartMoneyTimer = setInterval(refreshSmartMoney, SMART_MONEY_REFRESH_MS);
   const hotTokensTimer = setInterval(refreshHot, HOT_TOKENS_REFRESH_MS);
 
+  let totalPairEvents = 0;
+  let wethPairEvents = 0;
+  const heartbeatTimer = setInterval(() => {
+    logger.info(
+      `New-pair watcher heartbeat: ${totalPairEvents} total pair(s) seen, ${wethPairEvents} WETH-paired, since last heartbeat.`
+    );
+    totalPairEvents = 0;
+    wethPairEvents = 0;
+  }, HOT_TOKENS_REFRESH_MS);
+
   const stopNewPairWatcher = startNewPairWatcher(async (ev) => {
+    totalPairEvents++;
     const candidate = candidateTokenFromPair(ev);
     if (!candidate) return;
+    wethPairEvents++;
     if (tokensRepo.get(candidate)) return; // already tracked
 
     let initialMarketCapUsd: number | null = null;
@@ -206,6 +218,7 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
   return () => {
     clearInterval(smartMoneyTimer);
     clearInterval(hotTokensTimer);
+    clearInterval(heartbeatTimer);
     for (const timer of pendingFreshPairChecks) clearTimeout(timer);
     pendingFreshPairChecks.clear();
     stopNewPairWatcher();
