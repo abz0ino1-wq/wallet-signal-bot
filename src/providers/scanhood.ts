@@ -15,8 +15,20 @@ interface ScanHoodResponse {
   sellable?: boolean; // honeypot buy+sell simulation result, right now
   lp?: { status?: string; locked?: boolean };
   lp_status?: string;
-  flags?: string[];
+  // Elements are sometimes plain strings, sometimes objects (e.g.
+  // {code, message}) -- flagToString() below normalizes either shape.
+  flags?: unknown[];
   [key: string]: unknown;
+}
+
+function flagToString(flag: unknown): string {
+  if (typeof flag === "string") return flag;
+  if (flag && typeof flag === "object") {
+    const obj = flag as Record<string, unknown>;
+    const label = obj.message ?? obj.code ?? obj.type ?? obj.name;
+    if (typeof label === "string") return label;
+  }
+  return JSON.stringify(flag);
 }
 
 // Confirmed via https://scanhood.xyz/llms.txt (ScanHood's own agent-oriented
@@ -53,7 +65,7 @@ export async function getTokenSafety(tokenAddress: string): Promise<TokenSafety>
 
     const verdict = data.verdict.toUpperCase();
     const isHoneypot = data.sellable === false || verdict === "DANGER";
-    const reasons: string[] = Array.isArray(data.flags) ? [...data.flags] : [];
+    const reasons: string[] = Array.isArray(data.flags) ? data.flags.map(flagToString) : [];
 
     let score = verdict === "PASS" ? 90 : verdict === "CAUTION" ? 50 : 0;
 
