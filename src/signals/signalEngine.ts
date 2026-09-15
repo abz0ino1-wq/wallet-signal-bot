@@ -70,40 +70,67 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
 
   const pendingFreshPairChecks = new Set<ReturnType<typeof setTimeout>>();
 
-  const FRESH_PAIR_MAX_RETRIES = 3;
-  const FRESH_PAIR_RETRY_DELAY_MS = 60_000;
+  const FRESH_PAIR_MAX_DATA_RETRIES = 4;
+  const FRESH_PAIR_DATA_RETRY_DELAY_MS = 5_000;
+  const FRESH_PAIR_MAX_SAFETY_RETRIES = 3;
+  const FRESH_PAIR_SAFETY_RETRY_DELAY_MS = 60_000;
 
   /**
    * "GMGN-style" fresh-listing signal: fires once a brand-new pair has real
-   * liquidity and passes a basic safety check. Runs on a delay after
-   * creation because Dexscreener typically hasn't indexed a pool in the
-   * first few seconds -- this is still "early" relative to when a human
-   * would notice a new listing, just not the very first block.
+   * liquidity, is still below the catch-it-early market-cap ceiling, and
+   * passes a basic safety check.
    *
-   * ScanHood sometimes can't run its sell simulation on a token at all --
-   * not just "too new," but structurally unable to find some V4 pools
-   * regardless of age (confirmed: a token 44 minutes old with huge trading
-   * volume still came back "no pool / new token"). `unverifiable`
-   * distinguishes that from an actually-risky CAUTION/DANGER. It gets
-   * retried a few times in case it *was* just a timing issue, but if it's
-   * still unverifiable after retries, this surfaces the alert anyway with
-   * an explicit warning rather than silently suppressing a real token
-   * forever because of a gap in ScanHood's own coverage.
+   * Two independent retry loops:
+   * - Data availability (dataAttempt): Dexscreener often hasn't indexed a
+   *   pool in the first few seconds, so a missing/low liquidity reading
+   *   gets a few quick retries before giving up -- this is deliberately
+   *   fast (5s apart) since the market-cap ceiling below only helps if we
+   *   look *before* the token has already run.
+   * - Safety verification (safetyAttempt): ScanHood sometimes can't run
+   *   its sell simulation at all -- not just "too new," but structurally
+   *   unable to find some V4 pools regardless of age (confirmed: a token
+   *   44 minutes old with huge trading volume still came back "no pool /
+   *   new token"). `unverifiable` distinguishes that from an actually-
+   *   risky CAUTION/DANGER, and gets retried a few times (60s apart) in
+   *   case it *was* just a timing issue, surfacing the alert with an
+   *   explicit warning if it's still unverifiable afterward rather than
+   *   silently suppressing a real token forever.
    */
-  async function checkFreshPair(candidate: string, ev: NewPairEvent, attempt = 0) {
+  async function checkFreshPair(candidate: string, ev: NewPairEvent, dataAttempt = 0, safetyAttempt = 0) {
     try {
       const pair = await getBestPair(config.chain.name, candidate);
       const marketCapUsd = pair?.marketCap ?? pair?.fdv ?? null;
       const liquidityUsd = pair?.liquidity?.usd ?? null;
-      if (!liquidityUsd || liquidityUsd < config.thresholds.minFreshPairLiquidityUsd) return;
+
+      if (!liquidityUsd || liquidityUsd < config.thresholds.minFreshPairLiquidityUsd) {
+        if (dataAttempt < FRESH_PAIR_MAX_DATA_RETRIES) {
+          const timer = setTimeout(() => {
+            pendingFreshPairChecks.delete(timer);
+            checkFreshPair(candidate, ev, dataAttempt + 1, safetyAttempt);
+          }, FRESH_PAIR_DATA_RETRY_DELAY_MS);
+          pendingFreshPairChecks.add(timer);
+        }
+        return;
+      }
+
+      // Once we have real mcap data, if it's already past the ceiling,
+      // that's not a data-lag issue -- the token already ran, and no
+      // amount of retrying fixes that. Skip permanently rather than
+      // report a token that's no longer "early."
+      if (marketCapUsd != null && marketCapUsd > config.thresholds.maxFreshPairMarketCapUsd) {
+        logger.info(
+          `Fresh pair: skipping ${candidate} -- already at $${marketCapUsd.toLocaleString()} mcap, past the $${config.thresholds.maxFreshPairMarketCapUsd.toLocaleString()} catch-it-early ceiling.`
+        );
+        return;
+      }
 
       const safety = await getTokenSafety(candidate);
-      if (safety.unverifiable && attempt < FRESH_PAIR_MAX_RETRIES) {
-        logger.info(`Fresh pair: ${candidate} not yet verifiable by ScanHood, retrying in 60s (attempt ${attempt + 1}/${FRESH_PAIR_MAX_RETRIES}).`);
+      if (safety.unverifiable && safetyAttempt < FRESH_PAIR_MAX_SAFETY_RETRIES) {
+        logger.info(`Fresh pair: ${candidate} not yet verifiable by ScanHood, retrying in 60s (attempt ${safetyAttempt + 1}/${FRESH_PAIR_MAX_SAFETY_RETRIES}).`);
         const timer = setTimeout(() => {
           pendingFreshPairChecks.delete(timer);
-          checkFreshPair(candidate, ev, attempt + 1);
-        }, FRESH_PAIR_RETRY_DELAY_MS);
+          checkFreshPair(candidate, ev, dataAttempt, safetyAttempt + 1);
+        }, FRESH_PAIR_SAFETY_RETRY_DELAY_MS);
         pendingFreshPairChecks.add(timer);
         return;
       }

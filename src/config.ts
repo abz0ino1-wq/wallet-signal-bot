@@ -74,12 +74,18 @@ export const config = {
     // Separate (lower) bar for brand-new pairs: a token seconds old won't yet
     // have the liquidity/volume an established "hot" token would.
     minFreshPairLiquidityUsd: envInt("MIN_FRESH_PAIR_LIQUIDITY_USD", 2_000),
+    // Hard ceiling for fresh_pair specifically: the whole point is catching
+    // a token while it's still small. Some tokens on this chain pump 10-50x
+    // within seconds of launch -- once a token is past this, alerting on it
+    // is just noise, not a lead, so it's skipped rather than reported late.
+    maxFreshPairMarketCapUsd: envInt("MAX_FRESH_PAIR_MARKET_CAP_USD", 30_000),
   },
   freshPair: {
-    // How long to wait after a new pair is created before checking its
-    // liquidity/safety -- Dexscreener often hasn't indexed a pool yet in the
-    // first few seconds after creation.
-    checkDelayMs: envInt("FRESH_PAIR_CHECK_DELAY_MS", 15_000),
+    // How long to wait after a new pair is created before the first check --
+    // Dexscreener often hasn't indexed a pool yet in the first couple
+    // seconds. Short on purpose: the ceiling above only helps if we look
+    // before the token has already run.
+    checkDelayMs: envInt("FRESH_PAIR_CHECK_DELAY_MS", 5_000),
   },
   discovery: {
     minPumpMultiple: envInt("DISCOVERY_MIN_PUMP_MULTIPLE", 3),

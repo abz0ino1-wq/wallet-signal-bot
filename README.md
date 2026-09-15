@@ -57,10 +57,13 @@ Separately, on a cron schedule:
   ones), and passed a ScanHood honeypot/scam check.
 - **`hot_token_buy`** — real-time buy pressure on a token already on the
   hot list above.
-- **`fresh_pair`** — a brand-new Uniswap pool just went live (checked ~15s
-  after creation, once it has real liquidity and passes the ScanHood safety
-  check). This is the "just migrated / just listed" signal — closer to what
-  GMGN's migration feed surfaces than the boost-based
+- **`fresh_pair`** — a brand-new Uniswap pool just went live (first checked
+  ~5s after creation, once it has real liquidity, is still under
+  `MAX_FRESH_PAIR_MARKET_CAP_USD` (default $30k — some tokens on this chain
+  pump 10-50x within seconds, so this ceiling exists specifically to skip
+  ones that already ran before we could report them), and passes the
+  ScanHood safety check). This is the "just migrated / just listed" signal
+  — closer to what GMGN's migration feed surfaces than the boost-based
   `new_dex_paid_low_mcap`, which depends on a token actually showing up in
   Dexscreener's boosted-token feed.
 - **`composite`** — both at once (smart wallet buying a hot low-cap token) —
