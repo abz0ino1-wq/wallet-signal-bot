@@ -1,5 +1,7 @@
 import cron from "node-cron";
+import { config } from "./config";
 import { startSignalEngine } from "./signals/signalEngine";
+import { checkCallMilestones } from "./signals/callTracker";
 import { sendPlainMessage, sendSignalToTelegram } from "./telegram/bot";
 import { discoverCandidateWallets } from "./wallets/candidateDiscovery";
 import { walletsRepo } from "./db";
@@ -45,6 +47,17 @@ async function main() {
     runScoringPass().catch((err) => logger.error("Cron scoring pass failed:", err));
   });
 
+  // Follows up on every token we've already alerted on: "called $91k -> $453k,
+  // hit 5X" style milestone messages as the peak market cap since the call
+  // crosses each new multiple.
+  const callTrackingInterval = setInterval(() => {
+    checkCallMilestones((message) => {
+      sendPlainMessage(message).catch((err) =>
+        logger.warn(`Failed to send call-milestone message: ${(err as Error).message}`)
+      );
+    }).catch((err) => logger.warn(`Call tracker pass failed: ${(err as Error).message}`));
+  }, config.callTracking.checkIntervalMs);
+
   await sendPlainMessage("✅ wallet-signal-bot is online and watching Robinhood Chain.").catch(() => {
     logger.warn("Startup Telegram notification failed -- check TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.");
   });
@@ -52,10 +65,12 @@ async function main() {
   process.on("SIGINT", () => {
     logger.info("Shutting down...");
     stopSignalEngine();
+    clearInterval(callTrackingInterval);
     process.exit(0);
   });
   process.on("SIGTERM", () => {
     stopSignalEngine();
+    clearInterval(callTrackingInterval);
     process.exit(0);
   });
 }

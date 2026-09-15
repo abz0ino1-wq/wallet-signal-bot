@@ -91,6 +91,14 @@ export const config = {
     minPumpMultiple: envInt("DISCOVERY_MIN_PUMP_MULTIPLE", 3),
     tokenSampleSize: envInt("DISCOVERY_TOKEN_SAMPLE_SIZE", 25),
   },
+  callTracking: {
+    // "Called $91k -> $453k, hit 5X" follow-ups: how often to re-check
+    // active calls, and how long a call stays active before we stop
+    // bothering (an old, long-dead call re-checked forever would just
+    // waste API calls for no benefit).
+    checkIntervalMs: envInt("CALL_CHECK_INTERVAL_MS", 3 * 60 * 1000),
+    trackWindowMs: envInt("CALL_TRACK_WINDOW_HOURS", 72) * 60 * 60 * 1000,
+  },
   scanhood: {
     baseUrl: process.env.SCANHOOD_API_URL || "https://scanhood.xyz",
   },

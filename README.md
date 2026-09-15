@@ -69,6 +69,25 @@ Separately, on a cron schedule:
 - **`composite`** — both at once (smart wallet buying a hot low-cap token) —
   highest-confidence signal.
 
+### Call tracking (follow-up alerts)
+
+Every time a signal fires for a token, its market cap at that moment is
+recorded as "the call" (first alert only — later signals on the same token
+don't reset it). A background pass (`CALL_CHECK_INTERVAL_MS`, default every
+3 minutes) then re-checks each tracked token's current market cap and tracks
+the peak seen since the call. The first time that peak crosses a new
+multiple (2x, 3x, 5x, 10x, 20x, 50x, 100x, 200x, 500x, 1000x), it sends a
+follow-up message:
+
+```
+🔥 $ACORN hit 5X
+called $91k → $453k
+peak since the call · dyor
+```
+
+A token stops being tracked after `CALL_TRACK_WINDOW_HOURS` (default 72h)
+with no further checks, so long-dead calls don't waste API calls forever.
+
 ## Setup
 
 ```bash

@@ -1,4 +1,4 @@
-import { signalsRepo, tokensRepo, walletsRepo } from "../db";
+import { callsRepo, signalsRepo, tokensRepo, walletsRepo } from "../db";
 import { config } from "../config";
 import { startSwapWatcher } from "../chain/swapWatcher";
 import { candidateTokenFromPair, startNewPairWatcher, type NewPairEvent } from "../chain/newPairWatcher";
@@ -160,6 +160,7 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
       const safetyLine = safety.unverifiable
         ? `Safety: ⚠️ UNVERIFIED (ScanHood couldn't test this pool -- DYOR before buying)`
         : `Safety: ${safety.score}/100`;
+      if (marketCapUsd != null) callsRepo.recordIfNew(candidate, label, marketCapUsd, Date.now());
       emit({
         tokenAddress: candidate,
         walletAddress: null,
@@ -248,6 +249,9 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
     const tokenLabel = hotToken?.symbol ?? swap.tokenAddress;
 
     const hotTokenSafetyNote = hotToken?.safetyScore == null ? " (⚠️ safety unverified)" : "";
+    if (hotToken?.marketCapUsd != null) {
+      callsRepo.recordIfNew(swap.tokenAddress, hotToken.symbol, hotToken.marketCapUsd, Date.now());
+    }
 
     if (isSmartMoney && hotToken) {
       emit({

@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { config } from "../config";
-import type { SignalRecord, TokenRecord, WalletRecord, WalletTier, WalletTrade } from "../types";
+import type { CallRecord, SignalRecord, TokenRecord, WalletRecord, WalletTier, WalletTrade } from "../types";
 
 const dbDir = path.dirname(config.db.path);
 if (!fs.existsSync(dbDir)) {
@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS signals (
   sent_to_telegram INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_signals_token ON signals(token_address);
+
+CREATE TABLE IF NOT EXISTS calls (
+  token_address TEXT PRIMARY KEY,
+  symbol TEXT,
+  call_market_cap_usd REAL NOT NULL,
+  call_at INTEGER NOT NULL,
+  peak_market_cap_usd REAL NOT NULL,
+  peak_at INTEGER NOT NULL,
+  last_milestone REAL NOT NULL DEFAULT 0,
+  last_checked_at INTEGER
+);
 `);
 
 function rowToToken(row: any): TokenRecord {
@@ -235,5 +246,45 @@ export const signalsRepo = {
     return db
       .prepare(`SELECT * FROM signals WHERE token_address = ? AND created_at >= ?`)
       .all(address.toLowerCase(), sinceMs) as any[];
+  },
+};
+
+function rowToCall(row: any): CallRecord {
+  return {
+    tokenAddress: row.token_address,
+    symbol: row.symbol,
+    callMarketCapUsd: row.call_market_cap_usd,
+    callAt: row.call_at,
+    peakMarketCapUsd: row.peak_market_cap_usd,
+    peakAt: row.peak_at,
+    lastMilestone: row.last_milestone,
+    lastCheckedAt: row.last_checked_at,
+  };
+}
+
+export const callsRepo = {
+  /** Records the token's mcap at the moment we first alert on it. A no-op if we've already called this token. */
+  recordIfNew(tokenAddress: string, symbol: string | null, callMarketCapUsd: number, atMs: number) {
+    db.prepare(
+      `INSERT INTO calls (token_address, symbol, call_market_cap_usd, call_at, peak_market_cap_usd, peak_at, last_milestone, last_checked_at)
+       VALUES (@tokenAddress, @symbol, @callMarketCapUsd, @callAt, @callMarketCapUsd, @callAt, 0, @callAt)
+       ON CONFLICT(token_address) DO NOTHING`
+    ).run({
+      tokenAddress: tokenAddress.toLowerCase(),
+      symbol,
+      callMarketCapUsd,
+      callAt: atMs,
+    });
+  },
+  updatePeakAndMilestone(tokenAddress: string, peakMarketCapUsd: number, peakAt: number, lastMilestone: number) {
+    db.prepare(
+      `UPDATE calls SET peak_market_cap_usd = @peakMarketCapUsd, peak_at = @peakAt, last_milestone = @lastMilestone, last_checked_at = @peakAt WHERE token_address = @tokenAddress`
+    ).run({ tokenAddress: tokenAddress.toLowerCase(), peakMarketCapUsd, peakAt, lastMilestone });
+  },
+  touchChecked(tokenAddress: string, atMs: number) {
+    db.prepare(`UPDATE calls SET last_checked_at = ? WHERE token_address = ?`).run(atMs, tokenAddress.toLowerCase());
+  },
+  active(sinceMs: number): CallRecord[] {
+    return (db.prepare(`SELECT * FROM calls WHERE call_at >= ?`).all(sinceMs) as any[]).map(rowToCall);
   },
 };

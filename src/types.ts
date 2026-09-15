@@ -69,6 +69,17 @@ export interface DecodedSwap {
   router: Address;
 }
 
+export interface CallRecord {
+  tokenAddress: Address;
+  symbol: string | null;
+  callMarketCapUsd: number;
+  callAt: number;
+  peakMarketCapUsd: number;
+  peakAt: number;
+  lastMilestone: number;
+  lastCheckedAt: number | null;
+}
+
 export interface DexscreenerPair {
   chainId: string;
   dexId: string;
