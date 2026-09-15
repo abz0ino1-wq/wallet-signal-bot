@@ -1,10 +1,11 @@
 # wallet-signal-bot
 
 Finds profitable wallets on **Robinhood Chain**, watches confirmed swaps in
-real time (early — this chain has ~100ms blocks, so there's barely a mempool
-window worth watching separately), and screens Dexscreener's "dex paid"
-(boosted) low-market-cap tokens plus every brand-new pair for basic scam red
-flags — then pushes everything to Telegram.
+real time across Uniswap V2, V3, *and V4* (early — this chain has ~100ms
+blocks, so there's barely a mempool window worth watching separately), and
+screens Dexscreener's "dex paid" (boosted) low-market-cap tokens plus every
+brand-new pair for basic scam red flags — then pushes everything to
+Telegram.
 
 Scope: **Robinhood Chain** (chainId `4663`, an Arbitrum Orbit L2, EVM
 compatible, launched mainnet July 2026). Originally built against Ethereum
@@ -18,12 +19,13 @@ rather than Ethereum accessed through the Robinhood app.
 ┌──────────────────┐     ┌──────────────────────┐     ┌───────────────────┐
 │ New pair watcher  │────▶│                       │     │                   │
 │ (Uniswap V2/V3    │     │                       │     │                   │
-│  factory logs)    │     │                       │     │                   │
-└───────────────────┘     │     Signal Engine     │────▶│   Telegram bot    │
-┌───────────────────┐     │  (in-memory caches +   │     │                   │
-│ Swap watcher       │────▶│   throttled alerts)    │     │                   │
-│ (confirmed Swap    │     │                       │     └───────────────────┘
-│  events, chain-wide)│     └──────────┬────────────┘
+│  factory logs +   │     │                       │     │                   │
+│  V4 PoolManager)   │     │     Signal Engine     │────▶│   Telegram bot    │
+└───────────────────┘     │  (in-memory caches +   │     │                   │
+┌───────────────────┐     │   throttled alerts)    │     │                   │
+│ Swap watcher       │────▶│                       │     └───────────────────┘
+│ (confirmed Swap    │     └──────────┬────────────┘
+│  events, V2+V3+V4)  │                │
 └───────────────────┘                 │
                       ┌─────────────┴─────────────┐
                       │                            │
@@ -134,11 +136,17 @@ docs) -- but a few things are still worth knowing:
   signal path doesn't have this gap: `src/chain/swapWatcher.ts` watches
   confirmed Swap events directly rather than decoding router calldata, so
   it sees every swap regardless of entrypoint.
-- **The swap watcher approximates "trader" as the Swap event's recipient**
-  (`to`/`recipient` field) rather than the transaction's `from`, to avoid an
-  extra RPC call per swap. Correct for the common case (a wallet swapping
-  directly); can misattribute swaps routed through an intermediary contract
-  that sets a different recipient.
+- **The swap watcher approximates "trader" as the Swap event's own party
+  field** (`to` for V2, `recipient` for V3, `sender` for V4) rather than the
+  transaction's `from`, to avoid an extra RPC call per swap. Correct for the
+  common case (a wallet swapping directly); can misattribute swaps routed
+  through an intermediary contract that sets a different party -- **this is
+  notably weaker for V4**, since V4 funnels almost every retail swap through
+  Universal Router, so `sender` is usually the router's own address, not
+  the wallet controlling it. `hot_token_buy`/`new_dex_paid_low_mcap` signals
+  still work fine (they don't need to know exactly who), but
+  `smart_money_buy`/`composite` detection is unreliable for V4 swaps until
+  this is upgraded to resolve the real trader (e.g. via `getTransaction`).
 - **"Dex paid" detection** uses Dexscreener's public (undocumented, no API
   key) token-boosts endpoints, filtered to `chainId === "robinhood"` --
   also unverified live from this environment. If `Hot tokens: fetched X...
@@ -147,10 +155,38 @@ docs) -- but a few things are still worth knowing:
 - **Safety screening is not a rug-pull guarantee** regardless of provider.
   Low-cap, freshly-listed tokens are inherently high risk; treat every
   signal as a lead to research further, not a trade instruction.
-- **New-pair discovery only tracks WETH-paired pools.** Pairs quoted in
-  other tokens are currently skipped since pricing them needs an extra hop
-  — `candidateTokenFromPair` in `src/chain/newPairWatcher.ts` is where that
-  logic lives if you want to extend it.
+- **New-pair discovery tracks WETH- and native-ETH-paired pools only.**
+  V4 pools are commonly paired directly against native ETH (the zero
+  address) rather than wrapped WETH -- `isWethOrNative()` in
+  `src/chain/weth.ts` handles both. Pools quoted in a different currency
+  entirely (this chain has a stablecoin, USDG, that some tokens pair
+  against as a *secondary* pool alongside their main ETH-paired one) are
+  still skipped, since pricing them needs an extra hop. In the tokens
+  checked while building this, the USDG-quoted pools were consistently
+  much smaller than the ETH-paired ones, so this wasn't worth the added
+  complexity yet -- `candidateTokenFromPair` in
+  `src/chain/newPairWatcher.ts` is where that logic lives if you want to
+  extend it.
+- **Uniswap V4 support was added after discovering it's the dominant venue
+  on this chain**, not V2/V3 as initially assumed -- two real example
+  tokens checked while building this (TENSOR, WAIFU) were both V4-only
+  with $100k-$5M in 24h volume, and were invisible to the bot before this
+  was added. V4 has no per-pool contract; a singleton `PoolManager`
+  (`UNISWAP_V4_POOL_MANAGER` in `src/decode/uniswapAbi.ts`) emits
+  `Initialize` (new pool) and `Swap` events for every pool chain-wide,
+  keyed by a `poolId` instead of a deployed address --
+  `src/chain/poolRegistry.ts`'s cache is keyed generically by string so it
+  handles both address-keyed (V2/V3) and poolId-keyed (V4) pools. V4's
+  event ABI is stable across every chain it's deployed to (only
+  `PoolManager`'s address differs per chain), so those signatures are from
+  Uniswap's v4-core source, not guessed for this chain.
+- **ScanHood's simulation appears unreliable for V4 pools specifically.**
+  One example token scanned during testing got a false DANGER/honeypot
+  verdict -- ScanHood's response showed it testing against a near-zero-
+  liquidity pool, while Dexscreener showed a real, actively-trading V4
+  pool with six-figure liquidity for the same token. If a token you know
+  is trading fine keeps failing the safety check, this may be why --
+  ScanHood may not always be finding/testing the actual active V4 pool.
 - **No paid wallet-PnL indexer (Moralis/Nansen/etc.) is wired up.** This
   chain is too new for most of them to have added support yet; the local
   heuristic scorer is the only option right now.
@@ -165,7 +201,7 @@ src/
   providers/              Dexscreener, ScanHood, Blockscout clients
   chain/                  viem client, WETH resolution, new-pair watcher,
                           swap watcher, pool registry
-  decode/                 Uniswap V2/V3 calldata ABIs + swap decoder
+  decode/                 Uniswap V2/V3/V4 event + calldata ABIs, swap decoder
   wallets/                candidate discovery + profitability scoring
   signals/                hot-token screening + the signal engine
   telegram/               alert delivery

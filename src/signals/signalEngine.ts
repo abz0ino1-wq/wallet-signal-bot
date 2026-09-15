@@ -33,6 +33,12 @@ function explorerUrl(address: string): string {
   return `https://robinhoodchain.blockscout.com/address/${address}`;
 }
 
+function dexLabel(dex: NewPairEvent["dex"]): string {
+  if (dex === "uniswap_v4") return "Uniswap V4";
+  if (dex === "uniswap_v3") return "Uniswap V3";
+  return "Uniswap V2";
+}
+
 export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => void {
   let smartMoney = new Set<string>();
   let hotTokens = new Map<string, TokenRecord>();
@@ -123,7 +129,7 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         signalType: "fresh_pair",
         score: 50,
         message:
-          `🆕 Fresh pair: ${label} just got a live market on ${ev.dex === "uniswap_v3" ? "Uniswap V3" : "Uniswap V2"}.\n` +
+          `🆕 Fresh pair: ${label} just got a live market on ${dexLabel(ev.dex)}.\n` +
           `MCap: $${marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${liquidityUsd.toLocaleString()} | Safety: ${safety.score}/100\n` +
           `Token: ${dexscreenerUrl(candidate)}\n` +
           `Contract: ${explorerUrl(candidate)}`,

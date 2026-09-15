@@ -24,6 +24,11 @@ export async function getPoolTokens(poolAddress: string): Promise<PoolTokens | n
   const existing = inFlight.get(key);
   if (existing) return existing;
 
+  // V4 pools are keyed by a bytes32 poolId, not a deployed contract address
+  // -- there's no token0()/token1() to call (that's V2/V3-specific), so a
+  // V4 pool we haven't seen an Initialize event for is simply unresolvable.
+  if (key.length !== 42) return null;
+
   const promise = (async (): Promise<PoolTokens | null> => {
     try {
       const [token0, token1] = await Promise.all([

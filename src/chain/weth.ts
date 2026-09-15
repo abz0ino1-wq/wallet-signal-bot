@@ -1,5 +1,5 @@
 import { httpClient } from "./viemClient";
-import { KNOWN_ROUTERS, uniswapV2RouterAbi } from "../decode/uniswapAbi";
+import { KNOWN_ROUTERS, NATIVE_TOKEN_SENTINEL, uniswapV2RouterAbi } from "../decode/uniswapAbi";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 
@@ -35,4 +35,14 @@ export function getWeth(): string {
     throw new Error("WETH address not resolved yet -- call resolveWeth() at startup before using getWeth().");
   }
   return resolved;
+}
+
+/**
+ * V4 pools commonly pair directly against native ETH (the zero-address
+ * sentinel) instead of wrapped WETH -- treat both as "the ETH side" of a
+ * pair wherever we check for WETH-denominated pools.
+ */
+export function isWethOrNative(address: string): boolean {
+  const lower = address.toLowerCase();
+  return lower === getWeth() || lower === NATIVE_TOKEN_SENTINEL;
 }

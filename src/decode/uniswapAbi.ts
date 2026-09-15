@@ -11,6 +11,15 @@ export const KNOWN_ROUTERS = {
 
 export const UNISWAP_V2_FACTORY = "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f";
 export const UNISWAP_V3_FACTORY = "0x1f7d7550b1b028f7571e69a784071f0205fd2efa";
+// V4 has no per-pool factory/contract -- one singleton PoolManager holds
+// every pool's state, addressed by a bytes32 poolId rather than a deployed
+// pool address.
+export const UNISWAP_V4_POOL_MANAGER = "0x8366a39cc670b4001a1121b8f6a443a643e40951";
+
+// Native ETH is represented as the zero address in V4 (and in Dexscreener's
+// pair data) rather than requiring the wrapped WETH contract -- V4 pools are
+// commonly paired against this directly.
+export const NATIVE_TOKEN_SENTINEL = "0x0000000000000000000000000000000000000000";
 
 export const uniswapV2RouterAbi = parseAbi([
   "function WETH() view returns (address)",
@@ -50,6 +59,17 @@ export const uniswapV2SwapEventAbi = parseAbi([
 
 export const uniswapV3SwapEventAbi = parseAbi([
   "event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)",
+]);
+
+// V4's event signatures are stable across every chain it's deployed to
+// (only the PoolManager address differs) -- these come from v4-core's
+// PoolManager.sol, not guessed for this chain specifically.
+export const uniswapV4InitializeEventAbi = parseAbi([
+  "event Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)",
+]);
+
+export const uniswapV4SwapEventAbi = parseAbi([
+  "event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
 ]);
 
 export const poolTokensAbi = parseAbi([
