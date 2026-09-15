@@ -46,6 +46,13 @@ Separately, on a cron schedule:
   and passed a GoPlus honeypot/scam check.
 - **`early_mempool_buy`** — real-time buy pressure on a token already on the
   hot list above.
+- **`fresh_pair`** — a brand-new Uniswap pool just went live (checked ~15s
+  after creation, once it has real liquidity and passes a GoPlus safety
+  check). This is the "just migrated / just listed" signal — closer to what
+  tools like GMGN surface than the boost-based `new_dex_paid_low_mcap`,
+  which depends on Dexscreener's boosted-token feed actually having
+  Ethereum-chain tokens in it (often it doesn't -- that activity skews
+  heavily toward Solana/Base).
 - **`composite`** — both at once (smart wallet buying a hot low-cap token) —
   highest-confidence signal.
 

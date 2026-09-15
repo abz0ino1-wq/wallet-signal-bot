@@ -1,8 +1,9 @@
 import { signalsRepo, tokensRepo, walletsRepo } from "../db";
 import { config } from "../config";
 import { startMempoolWatcher } from "../chain/mempoolWatcher";
-import { candidateTokenFromPair, startNewPairWatcher } from "../chain/newPairWatcher";
+import { candidateTokenFromPair, startNewPairWatcher, type NewPairEvent } from "../chain/newPairWatcher";
 import { getBestPair } from "../providers/dexscreener";
+import { getTokenSafety } from "../providers/goplus";
 import { refreshHotTokens } from "./hotTokens";
 import type { SignalRecord, TokenRecord } from "../types";
 import { logger } from "../utils/logger";
@@ -52,6 +53,59 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
     onSignal({ ...record, id });
   }
 
+  const pendingFreshPairChecks = new Set<ReturnType<typeof setTimeout>>();
+
+  /**
+   * "GMGN-style" fresh-listing signal: fires once a brand-new pair has real
+   * liquidity and passes a basic safety check. Runs on a delay after
+   * creation because Dexscreener typically hasn't indexed a pool in the
+   * first few seconds -- this is still "early" relative to when a human
+   * would notice a new listing, just not the very first block.
+   */
+  async function checkFreshPair(candidate: string, ev: NewPairEvent) {
+    try {
+      const pair = await getBestPair(config.chain.name, candidate);
+      const marketCapUsd = pair?.marketCap ?? pair?.fdv ?? null;
+      const liquidityUsd = pair?.liquidity?.usd ?? null;
+      if (!liquidityUsd || liquidityUsd < config.thresholds.minFreshPairLiquidityUsd) return;
+
+      const safety = await getTokenSafety(candidate);
+      if (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore) {
+        logger.info(`Fresh pair: skipping ${candidate} (safety score ${safety.score}: ${safety.reasons.join(",")})`);
+        return;
+      }
+
+      const existing = tokensRepo.get(candidate);
+      tokensRepo.upsert({
+        address: candidate,
+        symbol: pair?.baseToken?.symbol ?? existing?.symbol ?? null,
+        name: pair?.baseToken?.name ?? existing?.name ?? null,
+        firstSeenAt: existing?.firstSeenAt ?? Date.now(),
+        initialMarketCapUsd: existing?.initialMarketCapUsd ?? marketCapUsd,
+        marketCapUsd,
+        liquidityUsd,
+        isDexPaid: existing?.isDexPaid ?? false,
+        safetyScore: safety.score,
+        lastCheckedAt: Date.now(),
+      });
+
+      const label = pair?.baseToken?.symbol ?? candidate;
+      emit({
+        tokenAddress: candidate,
+        walletAddress: null,
+        signalType: "fresh_pair",
+        score: 50,
+        message:
+          `🆕 Fresh pair: ${label} just got a live market on ${ev.dex === "uniswap_v3" ? "Uniswap V3" : "Uniswap V2"}.\n` +
+          `MCap: $${marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${liquidityUsd.toLocaleString()} | Safety: ${safety.score}/100\n` +
+          `Token: https://dexscreener.com/ethereum/${candidate}\n` +
+          `Contract: https://etherscan.io/address/${candidate}`,
+      });
+    } catch (err) {
+      logger.warn(`Fresh pair: failed checking ${candidate}: ${(err as Error).message}`);
+    }
+  }
+
   refreshSmartMoney();
   refreshHot();
   const smartMoneyTimer = setInterval(refreshSmartMoney, SMART_MONEY_REFRESH_MS);
@@ -83,6 +137,12 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
       lastCheckedAt: Date.now(),
     });
     logger.info(`New pair tracked: ${candidate} (${ev.dex}, initial mcap ${initialMarketCapUsd ?? "unknown"}).`);
+
+    const timer = setTimeout(() => {
+      pendingFreshPairChecks.delete(timer);
+      checkFreshPair(candidate, ev);
+    }, config.freshPair.checkDelayMs);
+    pendingFreshPairChecks.add(timer);
   });
 
   let mempoolBuyCount = 0;
@@ -146,6 +206,8 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
   return () => {
     clearInterval(smartMoneyTimer);
     clearInterval(hotTokensTimer);
+    for (const timer of pendingFreshPairChecks) clearTimeout(timer);
+    pendingFreshPairChecks.clear();
     stopNewPairWatcher();
     stopMempoolWatcher();
   };

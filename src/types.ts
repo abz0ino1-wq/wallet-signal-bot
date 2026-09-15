@@ -46,6 +46,7 @@ export type SignalType =
   | "smart_money_buy"
   | "early_mempool_buy"
   | "new_dex_paid_low_mcap"
+  | "fresh_pair"
   | "composite";
 
 export interface SignalRecord {

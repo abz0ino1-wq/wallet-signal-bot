@@ -62,6 +62,15 @@ export const config = {
     minLiquidityUsd: envInt("MIN_LIQUIDITY_USD", 5_000),
     minSafetyScore: envInt("MIN_SAFETY_SCORE", 60),
     minWalletScore: envInt("MIN_WALLET_SCORE", 60),
+    // Separate (lower) bar for brand-new pairs: a token seconds old won't yet
+    // have the liquidity an established "hot" token would.
+    minFreshPairLiquidityUsd: envInt("MIN_FRESH_PAIR_LIQUIDITY_USD", 2_000),
+  },
+  freshPair: {
+    // How long to wait after a new pair is created before checking its
+    // liquidity/safety -- Dexscreener often hasn't indexed a pool yet in the
+    // first few seconds after creation.
+    checkDelayMs: envInt("FRESH_PAIR_CHECK_DELAY_MS", 15_000),
   },
   discovery: {
     minPumpMultiple: envInt("DISCOVERY_MIN_PUMP_MULTIPLE", 3),
