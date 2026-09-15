@@ -231,7 +231,7 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
   });
 
   let swapCount = 0;
-  const stopSwapWatcher = startSwapWatcher((swap) => {
+  const stopSwapWatcher = startSwapWatcher(async (swap) => {
     if (swap.side !== "buy") return;
     swapCount++;
     if (swapCount % 50 === 0) {
@@ -248,9 +248,21 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
     const ethPart = swap.ethAmount ? `${swap.ethAmount.toFixed(3)} ETH` : "unknown amount";
     const tokenLabel = hotToken?.symbol ?? swap.tokenAddress;
 
+    // Every emitted signal needs a market cap to record "the call" against --
+    // hot tokens already carry one, but a smart-money buy on a token that
+    // isn't (yet) on the hot list doesn't, so fetch it directly in that case.
     const hotTokenSafetyNote = hotToken?.safetyScore == null ? " (⚠️ safety unverified)" : "";
-    if (hotToken?.marketCapUsd != null) {
-      callsRepo.recordIfNew(swap.tokenAddress, hotToken.symbol, hotToken.marketCapUsd, Date.now());
+    let callMarketCapUsd = hotToken?.marketCapUsd ?? null;
+    if (callMarketCapUsd == null) {
+      try {
+        const pair = await getBestPair(config.chain.name, swap.tokenAddress);
+        callMarketCapUsd = pair?.marketCap ?? pair?.fdv ?? null;
+      } catch (err) {
+        logger.warn(`Failed to fetch market cap for call tracking on ${swap.tokenAddress}: ${(err as Error).message}`);
+      }
+    }
+    if (callMarketCapUsd != null) {
+      callsRepo.recordIfNew(swap.tokenAddress, hotToken?.symbol ?? null, callMarketCapUsd, Date.now());
     }
 
     if (isSmartMoney && hotToken) {
