@@ -16,6 +16,13 @@ function short(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+function walletTrackRecord(address: string): string {
+  const w = walletsRepo.get(address);
+  if (!w) return "";
+  const pnl = w.realizedPnlUsd != null ? `$${w.realizedPnlUsd.toFixed(0)}` : `${w.realizedPnlEth.toFixed(2)} ETH`;
+  return ` (score ${w.score.toFixed(0)}, realized PnL ${pnl}, ${w.tradesCount} trades, via ${w.dataSource})`;
+}
+
 export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => void {
   let smartMoney = new Set<string>();
   let hotTokens = new Map<string, TokenRecord>();
@@ -98,7 +105,7 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         score: 95,
         message:
           `🚨 COMPOSITE SIGNAL\n` +
-          `Tracked smart-money wallet ${short(swap.trader)} is buying ${tokenLabel} (${ethPart}) ` +
+          `Tracked smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} is buying ${tokenLabel} (${ethPart}) ` +
           `-- a dex-paid, low-mcap token -- in the mempool right now (tx pending).\n` +
           `Token: https://dexscreener.com/ethereum/${swap.tokenAddress}\n` +
           `Wallet: https://etherscan.io/address/${swap.trader}`,
@@ -110,7 +117,7 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         signalType: "smart_money_buy",
         score: 75,
         message:
-          `📈 Smart-money wallet ${short(swap.trader)} is buying ${tokenLabel} (${ethPart}) -- pending in mempool.\n` +
+          `📈 Smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} is buying ${tokenLabel} (${ethPart}) -- pending in mempool.\n` +
           `Token: https://dexscreener.com/ethereum/${swap.tokenAddress}\n` +
           `Wallet: https://etherscan.io/address/${swap.trader}`,
       });

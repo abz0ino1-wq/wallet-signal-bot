@@ -31,8 +31,10 @@ CREATE TABLE IF NOT EXISTS wallets (
   score REAL NOT NULL DEFAULT 0,
   win_rate REAL NOT NULL DEFAULT 0,
   realized_pnl_eth REAL NOT NULL DEFAULT 0,
+  realized_pnl_usd REAL,
   trades_count INTEGER NOT NULL DEFAULT 0,
   tier TEXT NOT NULL DEFAULT 'candidate',
+  data_source TEXT NOT NULL DEFAULT 'heuristic',
   last_scored_at INTEGER
 );
 
@@ -83,8 +85,10 @@ function rowToWallet(row: any): WalletRecord {
     score: row.score,
     winRate: row.win_rate,
     realizedPnlEth: row.realized_pnl_eth,
+    realizedPnlUsd: row.realized_pnl_usd,
     tradesCount: row.trades_count,
     tier: row.tier,
+    dataSource: row.data_source,
     lastScoredAt: row.last_scored_at,
   };
 }
@@ -132,22 +136,26 @@ export const tokensRepo = {
 export const walletsRepo = {
   upsert(wallet: WalletRecord) {
     db.prepare(
-      `INSERT INTO wallets (address, score, win_rate, realized_pnl_eth, trades_count, tier, last_scored_at)
-       VALUES (@address, @score, @winRate, @realizedPnlEth, @tradesCount, @tier, @lastScoredAt)
+      `INSERT INTO wallets (address, score, win_rate, realized_pnl_eth, realized_pnl_usd, trades_count, tier, data_source, last_scored_at)
+       VALUES (@address, @score, @winRate, @realizedPnlEth, @realizedPnlUsd, @tradesCount, @tier, @dataSource, @lastScoredAt)
        ON CONFLICT(address) DO UPDATE SET
          score = excluded.score,
          win_rate = excluded.win_rate,
          realized_pnl_eth = excluded.realized_pnl_eth,
+         realized_pnl_usd = excluded.realized_pnl_usd,
          trades_count = excluded.trades_count,
          tier = excluded.tier,
+         data_source = excluded.data_source,
          last_scored_at = excluded.last_scored_at`
     ).run({
       address: wallet.address.toLowerCase(),
       score: wallet.score,
       winRate: wallet.winRate,
       realizedPnlEth: wallet.realizedPnlEth,
+      realizedPnlUsd: wallet.realizedPnlUsd,
       tradesCount: wallet.tradesCount,
       tier: wallet.tier,
+      dataSource: wallet.dataSource,
       lastScoredAt: wallet.lastScoredAt,
     });
   },

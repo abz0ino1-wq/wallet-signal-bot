@@ -15,13 +15,17 @@ export interface TokenRecord {
 
 export type WalletTier = "candidate" | "smart_money" | "rejected";
 
+export type WalletDataSource = "moralis" | "heuristic";
+
 export interface WalletRecord {
   address: Address;
   score: number;
   winRate: number;
   realizedPnlEth: number;
+  realizedPnlUsd: number | null;
   tradesCount: number;
   tier: WalletTier;
+  dataSource: WalletDataSource;
   lastScoredAt: number | null;
 }
 

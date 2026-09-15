@@ -61,7 +61,8 @@ Fill in `.env`:
 | Variable | Where to get it | Notes |
 |---|---|---|
 | `ALCHEMY_API_KEY` | [alchemy.com](https://www.alchemy.com/) free tier | Needed for the WS mempool subscription (`alchemy_pendingTransactions`) and live factory-log subscriptions. Free tier is enough to start. |
-| `ETHERSCAN_API_KEY` | [etherscan.io/apis](https://etherscan.io/apis) free tier | Used for wallet trade-history based profitability scoring. Rate-limited to ~5 req/sec on free tier; the client already throttles to stay under that. |
+| `ETHERSCAN_API_KEY` | [etherscan.io/apis](https://etherscan.io/apis) free tier | Used for the fallback wallet-scoring heuristic and as the earliest-buyers discovery method. Rate-limited to ~5 req/sec on free tier; the client already throttles to stay under that. |
+| `MORALIS_API_KEY` | [moralis.io](https://moralis.io) free tier | **Recommended.** Unlocks server-computed, USD-denominated wallet PnL (`/wallets/{address}/profitability/summary`) and per-token top-profitable-wallet lookups instead of the local heuristic. See "Wallet scoring: Moralis vs. heuristic" below. |
 | `TELEGRAM_BOT_TOKEN` | Message [@BotFather](https://t.me/BotFather), `/newbot` | |
 | `TELEGRAM_CHAT_ID` | Message your new bot once, then hit `https://api.telegram.org/bot<token>/getUpdates` and read `message.chat.id` | Can be your personal chat or a channel/group the bot is in. |
 
@@ -87,17 +88,43 @@ Run them manually first if you want signals sooner — a fresh DB has no
 smart-money wallets yet, so `smart_money_buy`/`composite` signals won't fire
 until at least one scoring pass has run.
 
+## Wallet scoring: Moralis vs. heuristic
+
+`src/wallets/walletScorer.ts` tries Moralis first (`getWalletProfitabilitySummary`)
+and only falls back to the local heuristic if `MORALIS_API_KEY` is unset, the
+call fails, or Moralis has no trade data for that wallet. Every scored wallet
+records which path produced it (`wallets.data_source` — `"moralis"` or
+`"heuristic"`), and Telegram alerts show it (`via moralis` / `via heuristic`)
+so you can see which signals are backed by the stronger data.
+
+Wallet *discovery* (finding candidates in the first place) works the same
+way: `src/wallets/candidateDiscovery.ts` first tries Moralis'
+top-profitable-wallets-per-token endpoint for a pumped token — which directly
+returns wallets that were *actually profitable* on it — and only falls back
+to "pull the token's earliest buyers from Etherscan" (a weaker proxy: early
+≠ profitable) when Moralis is unset or returns nothing for that token.
+
 ## Design notes / honest limitations
 
-- **Wallet PnL scoring is heuristic**, not exact. It decodes each wallet's own
+- **The Moralis per-token top-profitable-wallets endpoint path
+  (`/erc20/{address}/top-profitable-wallets`) is a best-effort implementation.**
+  Moralis' wallet-PnL-summary endpoint and fields are well-documented and
+  confirmed; the per-token endpoint's exact path/response shape was
+  reconstructed from Moralis' documented naming conventions and could not be
+  independently verified against a live response in this environment (network
+  egress here is restricted to package registries, not arbitrary APIs). It's
+  wrapped defensively — a failed/malformed response returns `null` and
+  `candidateDiscovery.ts` transparently falls back to the Etherscan method —
+  so a wrong path degrades gracefully rather than breaking anything. If it
+  404s for you, check `src/providers/moralis.ts` against
+  https://docs.moralis.com/web3-data-api/evm/reference/get-top-profitable-wallet-per-token
+  and adjust the URL.
+- **The heuristic fallback scorer is not exact.** It decodes each wallet's own
   Uniswap V2/V3 router calls from Etherscan history, matches buy-ETH-spent vs
   sell-ETH-received *per token* (not per-lot/FIFO), and scores on win-rate +
   realized PnL + trade count. It captures the common "ape in, dump the bag"
   pattern well; it will be less precise for wallets that scale in/out of a
-  position over time. If you get a paid Dune, Nansen, or Bitquery API key,
-  swap `src/wallets/walletScorer.ts`'s data source for exact per-lot PnL —
-  the rest of the pipeline (DB schema, tiering, signal engine) doesn't need
-  to change.
+  position over time. This only runs when Moralis isn't configured/available.
 - **Mempool decoding covers Uniswap V2 Router02 and V3 SwapRouter/SwapRouter02**
   only. It does *not* decode Uniswap's Universal Router (packed command
   encoding) or other DEXes (Sushiswap, 1inch, etc.) — those pending swaps are
@@ -125,7 +152,7 @@ src/
   config.ts              env + thresholds
   types.ts                shared types
   db/                     SQLite schema + repositories
-  providers/              Dexscreener, GoPlus, Etherscan clients
+  providers/              Dexscreener, GoPlus, Etherscan, Moralis clients
   chain/                  viem client, new-pair watcher, mempool watcher
   decode/                 Uniswap V2/V3 calldata ABIs + swap decoder
   wallets/                candidate discovery + profitability scoring

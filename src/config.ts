@@ -37,6 +37,15 @@ export const config = {
     },
     baseUrl: "https://api.etherscan.io/v2/api",
   },
+  moralis: {
+    // Optional: unlocks USD-denominated, server-computed wallet PnL instead
+    // of the local Etherscan-calldata heuristic. Falls back automatically
+    // when unset or when a call fails.
+    get apiKey(): string | null {
+      return process.env.MORALIS_API_KEY || null;
+    },
+    baseUrl: "https://deep-index.moralis.io/api/v2.2",
+  },
   telegram: {
     get botToken(): string {
       return requireEnv("TELEGRAM_BOT_TOKEN");
