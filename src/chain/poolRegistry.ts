@@ -1,5 +1,5 @@
 import { httpClient } from "./viemClient";
-import { poolTokensAbi } from "../decode/uniswapAbi";
+import { UNISWAP_V4_POOL_MANAGER, poolTokensAbi, uniswapV4InitializeEventAbi } from "../decode/uniswapAbi";
 import { logger } from "../utils/logger";
 
 interface PoolTokens {
@@ -25,9 +25,40 @@ export async function getPoolTokens(poolAddress: string): Promise<PoolTokens | n
   if (existing) return existing;
 
   // V4 pools are keyed by a bytes32 poolId, not a deployed contract address
-  // -- there's no token0()/token1() to call (that's V2/V3-specific), so a
-  // V4 pool we haven't seen an Initialize event for is simply unresolvable.
-  if (key.length !== 42) return null;
+  // -- there's no token0()/token1() to call (that's V2/V3-specific). But
+  // currency0/currency1 for a given poolId only ever appear on-chain in
+  // that pool's original Initialize event (id is an indexed topic), so a
+  // V4 pool the bot didn't personally see get created is still resolvable
+  // via a historical log lookup rather than being permanently invisible.
+  if (key.length !== 42) {
+    const promise = (async (): Promise<PoolTokens | null> => {
+      try {
+        const logs = await httpClient.getLogs({
+          address: UNISWAP_V4_POOL_MANAGER as `0x${string}`,
+          event: uniswapV4InitializeEventAbi[0],
+          args: { id: key as `0x${string}` },
+          strict: true,
+          fromBlock: 0n,
+          toBlock: "latest",
+        });
+        const log = logs[0];
+        if (!log) return null;
+        const tokens: PoolTokens = {
+          token0: log.args.currency0.toLowerCase(),
+          token1: log.args.currency1.toLowerCase(),
+        };
+        cache.set(key, tokens);
+        return tokens;
+      } catch (err) {
+        logger.warn(`poolRegistry: failed to resolve V4 pool ${poolAddress} via historical Initialize log: ${(err as Error).message}`);
+        return null;
+      } finally {
+        inFlight.delete(key);
+      }
+    })();
+    inFlight.set(key, promise);
+    return promise;
+  }
 
   const promise = (async (): Promise<PoolTokens | null> => {
     try {
