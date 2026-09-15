@@ -123,11 +123,19 @@ docs) -- but a few things are still worth knowing:
   based on the docs' prose description, not a literal example response --
   if `lp_not_locked` never shows up in reasons even for tokens you'd expect
   it on, that field name may need adjusting.
-- **Fails safe by design**: any ScanHood error or unrecognized response
-  treats a token as unsafe (skips the alert) rather than the other way
-  around. If you see `scanhood_unreachable` or `scanhood_unverifiable` in
-  the logs *consistently* (not just an occasional timeout), something about
-  the contract has changed -- re-check `scanhood.xyz/llms.txt`.
+- **Two different failure modes, two different defaults.** A network
+  error or unrecognized response shape (`scanhood_unreachable`/
+  `scanhood_unverifiable` reasons) still fails *closed* -- treated as
+  unsafe, alert skipped. If you see those *consistently* (not just an
+  occasional timeout), something about the contract has changed --
+  re-check `scanhood.xyz/llms.txt`. But a CAUTION verdict where the *only*
+  issue is "could not simulate a sell" (ScanHood structurally failing to
+  find/test some V4 pools -- confirmed on a token 44 minutes old with
+  heavy volume, so it's not just a timing thing) fails *open* after 3
+  retries: the alert fires anyway with an explicit "⚠️ UNVERIFIED" label
+  rather than permanently suppressing a real token because of a gap in
+  ScanHood's own V4 coverage. An actual DANGER/honeypot verdict, or a low
+  score for any other reason, still blocks either way.
 - **The wallet-scoring heuristic decodes V2 Router02 and V3 SwapRouter02
   calldata only.** It does *not* decode Universal Router calldata (packed
   command encoding) -- which is the *preferred* entrypoint on this chain

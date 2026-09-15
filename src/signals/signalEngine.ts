@@ -80,11 +80,15 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
    * first few seconds -- this is still "early" relative to when a human
    * would notice a new listing, just not the very first block.
    *
-   * ScanHood often can't run its sell simulation on a token this fresh (no
-   * trading history yet) and returns CAUTION purely for that reason --
-   * `unverifiable` distinguishes that from an actually-risky CAUTION, and
-   * gets retried a few times as the pool matures rather than treated as a
-   * permanent rejection.
+   * ScanHood sometimes can't run its sell simulation on a token at all --
+   * not just "too new," but structurally unable to find some V4 pools
+   * regardless of age (confirmed: a token 44 minutes old with huge trading
+   * volume still came back "no pool / new token"). `unverifiable`
+   * distinguishes that from an actually-risky CAUTION/DANGER. It gets
+   * retried a few times in case it *was* just a timing issue, but if it's
+   * still unverifiable after retries, this surfaces the alert anyway with
+   * an explicit warning rather than silently suppressing a real token
+   * forever because of a gap in ScanHood's own coverage.
    */
   async function checkFreshPair(candidate: string, ev: NewPairEvent, attempt = 0) {
     try {
@@ -103,7 +107,10 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         pendingFreshPairChecks.add(timer);
         return;
       }
-      if (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore) {
+      // A real DANGER/honeypot verdict or a low score for an actual reason
+      // still blocks. Only "still unverifiable after retries" falls through
+      // to the warned-alert path below instead of a permanent skip.
+      if (!safety.unverifiable && (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore)) {
         logger.info(`Fresh pair: skipping ${candidate} (safety score ${safety.score}: ${safety.reasons.join(",")})`);
         return;
       }
@@ -118,19 +125,22 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         marketCapUsd,
         liquidityUsd,
         isDexPaid: existing?.isDexPaid ?? false,
-        safetyScore: safety.score,
+        safetyScore: safety.unverifiable ? null : safety.score,
         lastCheckedAt: Date.now(),
       });
 
       const label = pair?.baseToken?.symbol ?? candidate;
+      const safetyLine = safety.unverifiable
+        ? `Safety: ⚠️ UNVERIFIED (ScanHood couldn't test this pool -- DYOR before buying)`
+        : `Safety: ${safety.score}/100`;
       emit({
         tokenAddress: candidate,
         walletAddress: null,
         signalType: "fresh_pair",
-        score: 50,
+        score: safety.unverifiable ? 35 : 50,
         message:
           `🆕 Fresh pair: ${label} just got a live market on ${dexLabel(ev.dex)}.\n` +
-          `MCap: $${marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${liquidityUsd.toLocaleString()} | Safety: ${safety.score}/100\n` +
+          `MCap: $${marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${liquidityUsd.toLocaleString()} | ${safetyLine}\n` +
           `Token: ${dexscreenerUrl(candidate)}\n` +
           `Contract: ${explorerUrl(candidate)}`,
       });
@@ -210,6 +220,8 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
     const ethPart = swap.ethAmount ? `${swap.ethAmount.toFixed(3)} ETH` : "unknown amount";
     const tokenLabel = hotToken?.symbol ?? swap.tokenAddress;
 
+    const hotTokenSafetyNote = hotToken?.safetyScore == null ? " (⚠️ safety unverified)" : "";
+
     if (isSmartMoney && hotToken) {
       emit({
         tokenAddress: swap.tokenAddress,
@@ -218,7 +230,7 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         score: 95,
         message:
           `🚨 COMPOSITE SIGNAL\n` +
-          `Tracked smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} just bought ${tokenLabel} (${ethPart}) ` +
+          `Tracked smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} just bought ${tokenLabel}${hotTokenSafetyNote} (${ethPart}) ` +
           `-- a dex-paid, low-mcap token -- confirmed on-chain.\n` +
           `Token: ${dexscreenerUrl(swap.tokenAddress)}\n` +
           `Wallet: ${explorerUrl(swap.trader)}`,
@@ -241,8 +253,8 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         signalType: "hot_token_buy",
         score: 55,
         message:
-          `👀 Buy pressure on dex-paid low-mcap token ${tokenLabel} (${ethPart}) from ${short(swap.trader)} -- confirmed on-chain.\n` +
-          `MCap: $${hotToken.marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${hotToken.liquidityUsd?.toLocaleString() ?? "?"}\n` +
+          `👀 Buy pressure on dex-paid low-mcap token ${tokenLabel}${hotTokenSafetyNote} (${ethPart}) from ${short(swap.trader)} -- confirmed on-chain.\n` +
+          `MCap: $${hotToken.marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${hotToken.liquidityUsd?.toLocaleString() ?? "?"} | Safety: ${hotToken.safetyScore ?? "unverified"}\n` +
           `Token: ${dexscreenerUrl(swap.tokenAddress)}`,
       });
     }

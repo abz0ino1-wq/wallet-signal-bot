@@ -67,10 +67,15 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
       }
 
       const safety = await getTokenSafety(address);
-      if (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore) {
+      // Only a real DANGER/honeypot verdict or a low score for an actual
+      // reason blocks. "Unverifiable" (ScanHood couldn't test this pool at
+      // all -- confirmed to happen even on tokens hours old with heavy
+      // volume, not just a timing thing) would otherwise retry forever on
+      // every 3-minute refresh and never resolve, permanently hiding a real
+      // token -- so it's let through instead, flagged in the record.
+      if (!safety.unverifiable && (safety.isHoneypot || safety.score < config.thresholds.minSafetyScore)) {
         skippedSafety++;
-        const note = safety.unverifiable ? "not yet verifiable, will recheck next refresh" : safety.reasons.join(",");
-        logger.info(`Hot tokens: skipping ${address} (safety score ${safety.score}: ${note})`);
+        logger.info(`Hot tokens: skipping ${address} (safety score ${safety.score}: ${safety.reasons.join(",")})`);
         continue;
       }
 
@@ -84,11 +89,14 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
         marketCapUsd,
         liquidityUsd,
         isDexPaid: true,
-        safetyScore: safety.score,
+        safetyScore: safety.unverifiable ? null : safety.score,
         lastCheckedAt: Date.now(),
       };
       tokensRepo.upsert(record);
       hot.set(address, record);
+      if (safety.unverifiable) {
+        logger.info(`Hot tokens: ${address} added UNVERIFIED (ScanHood couldn't test this pool) -- DYOR flagged.`);
+      }
     } catch (err) {
       logger.warn(`Hot tokens: failed processing ${address}: ${(err as Error).message}`);
     }
