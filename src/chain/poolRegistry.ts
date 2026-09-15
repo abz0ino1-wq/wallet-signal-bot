@@ -9,6 +9,22 @@ interface PoolTokens {
 
 const cache = new Map<string, PoolTokens>();
 const inFlight = new Map<string, Promise<PoolTokens | null>>();
+// Pools we already tried to resolve via a historical log lookup and got
+// nothing back -- without this, a genuinely-unresolvable poolId (or one hit
+// during a transient RPC hiccup) gets re-queried on every single swap that
+// references it, which is what caused an Alchemy 429 storm in practice.
+const unresolvedAt = new Map<string, number>();
+const UNRESOLVED_RETRY_MS = 5 * 60 * 1000;
+
+// A burst of swaps can reference many different not-yet-cached V4 pools at
+// once; without a shared throttle across all of them, every one fires its
+// own getLogs call immediately and the RPC provider rate-limits the lot.
+let lastV4LogQueryAt = 0;
+async function throttleV4LogQuery(minGapMs = 300) {
+  const wait = lastV4LogQueryAt + minGapMs - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastV4LogQueryAt = Date.now();
+}
 
 /** Populated directly from PairCreated/PoolCreated events -- no RPC call needed. */
 export function registerPool(poolAddress: string, token0: string, token1: string) {
@@ -31,8 +47,12 @@ export async function getPoolTokens(poolAddress: string): Promise<PoolTokens | n
   // V4 pool the bot didn't personally see get created is still resolvable
   // via a historical log lookup rather than being permanently invisible.
   if (key.length !== 42) {
+    const skippedAt = unresolvedAt.get(key);
+    if (skippedAt && Date.now() - skippedAt < UNRESOLVED_RETRY_MS) return null;
+
     const promise = (async (): Promise<PoolTokens | null> => {
       try {
+        await throttleV4LogQuery();
         const logs = await httpClient.getLogs({
           address: UNISWAP_V4_POOL_MANAGER as `0x${string}`,
           event: uniswapV4InitializeEventAbi[0],
@@ -42,7 +62,10 @@ export async function getPoolTokens(poolAddress: string): Promise<PoolTokens | n
           toBlock: "latest",
         });
         const log = logs[0];
-        if (!log) return null;
+        if (!log) {
+          unresolvedAt.set(key, Date.now());
+          return null;
+        }
         const tokens: PoolTokens = {
           token0: log.args.currency0.toLowerCase(),
           token1: log.args.currency1.toLowerCase(),
@@ -51,6 +74,7 @@ export async function getPoolTokens(poolAddress: string): Promise<PoolTokens | n
         return tokens;
       } catch (err) {
         logger.warn(`poolRegistry: failed to resolve V4 pool ${poolAddress} via historical Initialize log: ${(err as Error).message}`);
+        unresolvedAt.set(key, Date.now());
         return null;
       } finally {
         inFlight.delete(key);
