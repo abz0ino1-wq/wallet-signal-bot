@@ -1,3 +1,4 @@
+import WebSocket from "ws";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { decodeSwap } from "../decode/swapDecoder";
@@ -18,6 +19,10 @@ interface AlchemyPendingTx {
  * calls back before the trade confirms -- this is what "early" means here:
  * seeing the trade in the mempool rather than waiting for the mined block.
  *
+ * Uses the `ws` package explicitly rather than a global `WebSocket` -- that
+ * global only exists on Node 22+, and this needs to run on any Node LTS
+ * (20 included).
+ *
  * NOTE: this subscription method is Alchemy-specific. If ALCHEMY_WS_URL is
  * pointed at a different provider, mempool visibility will be degraded or
  * unavailable -- swap this module out for that provider's pending-tx API.
@@ -34,7 +39,7 @@ export function startMempoolWatcher(onSwap: (swap: DecodedSwap) => void): () => 
     if (stopped) return;
     socket = new WebSocket(config.rpc.wsUrl);
 
-    socket.addEventListener("open", () => {
+    socket.on("open", () => {
       reconnectAttempt = 0;
       logger.info("Mempool watcher connected.");
       socket?.send(
@@ -47,9 +52,9 @@ export function startMempoolWatcher(onSwap: (swap: DecodedSwap) => void): () => 
       );
     });
 
-    socket.addEventListener("message", (event: MessageEvent) => {
+    socket.on("message", (data) => {
       try {
-        const msg = JSON.parse(String(event.data));
+        const msg = JSON.parse(data.toString());
         if (msg.id === 1 && msg.result) {
           subscriptionId = msg.result;
           return;
@@ -71,7 +76,7 @@ export function startMempoolWatcher(onSwap: (swap: DecodedSwap) => void): () => 
       }
     });
 
-    socket.addEventListener("close", () => {
+    socket.on("close", () => {
       subscriptionId = null;
       if (stopped) return;
       reconnectAttempt++;
@@ -80,8 +85,8 @@ export function startMempoolWatcher(onSwap: (swap: DecodedSwap) => void): () => 
       setTimeout(connect, delay);
     });
 
-    socket.addEventListener("error", (err) => {
-      logger.error("Mempool watcher socket error:", err);
+    socket.on("error", (err) => {
+      logger.error("Mempool watcher socket error:", err.message);
     });
   }
 
