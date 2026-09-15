@@ -1,9 +1,10 @@
 import { signalsRepo, tokensRepo, walletsRepo } from "../db";
 import { config } from "../config";
-import { startMempoolWatcher } from "../chain/mempoolWatcher";
+import { startSwapWatcher } from "../chain/swapWatcher";
 import { candidateTokenFromPair, startNewPairWatcher, type NewPairEvent } from "../chain/newPairWatcher";
+import { registerPool } from "../chain/poolRegistry";
 import { getBestPair } from "../providers/dexscreener";
-import { getTokenSafety } from "../providers/goplus";
+import { getTokenSafety } from "../providers/scanhood";
 import { refreshHotTokens } from "./hotTokens";
 import type { SignalRecord, TokenRecord } from "../types";
 import { logger } from "../utils/logger";
@@ -22,6 +23,14 @@ function walletTrackRecord(address: string): string {
   if (!w) return "";
   const pnl = w.realizedPnlUsd != null ? `$${w.realizedPnlUsd.toFixed(0)}` : `${w.realizedPnlEth.toFixed(2)} ETH`;
   return ` (score ${w.score.toFixed(0)}, realized PnL ${pnl}, ${w.tradesCount} trades, via ${w.dataSource})`;
+}
+
+function dexscreenerUrl(tokenAddress: string): string {
+  return `https://dexscreener.com/${config.chain.name}/${tokenAddress}`;
+}
+
+function explorerUrl(address: string): string {
+  return `https://robinhoodchain.blockscout.com/address/${address}`;
 }
 
 export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => void {
@@ -98,8 +107,8 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         message:
           `🆕 Fresh pair: ${label} just got a live market on ${ev.dex === "uniswap_v3" ? "Uniswap V3" : "Uniswap V2"}.\n` +
           `MCap: $${marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${liquidityUsd.toLocaleString()} | Safety: ${safety.score}/100\n` +
-          `Token: https://dexscreener.com/ethereum/${candidate}\n` +
-          `Contract: https://etherscan.io/address/${candidate}`,
+          `Token: ${dexscreenerUrl(candidate)}\n` +
+          `Contract: ${explorerUrl(candidate)}`,
       });
     } catch (err) {
       logger.warn(`Fresh pair: failed checking ${candidate}: ${(err as Error).message}`);
@@ -123,6 +132,8 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
 
   const stopNewPairWatcher = startNewPairWatcher(async (ev) => {
     totalPairEvents++;
+    registerPool(ev.pairOrPool, ev.token0, ev.token1);
+
     const candidate = candidateTokenFromPair(ev);
     if (!candidate) return;
     wethPairEvents++;
@@ -157,12 +168,12 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
     pendingFreshPairChecks.add(timer);
   });
 
-  let mempoolBuyCount = 0;
-  const stopMempoolWatcher = startMempoolWatcher((swap) => {
+  let swapCount = 0;
+  const stopSwapWatcher = startSwapWatcher((swap) => {
     if (swap.side !== "buy") return;
-    mempoolBuyCount++;
-    if (mempoolBuyCount % 50 === 0) {
-      logger.info(`Mempool watcher: ${mempoolBuyCount} router buys seen so far (most won't match a signal yet).`);
+    swapCount++;
+    if (swapCount % 50 === 0) {
+      logger.info(`Swap watcher: ${swapCount} confirmed WETH-paired buys seen so far (most won't match a signal yet).`);
     }
 
     const isSmartMoney = smartMoney.has(swap.trader);
@@ -183,10 +194,10 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         score: 95,
         message:
           `🚨 COMPOSITE SIGNAL\n` +
-          `Tracked smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} is buying ${tokenLabel} (${ethPart}) ` +
-          `-- a dex-paid, low-mcap token -- in the mempool right now (tx pending).\n` +
-          `Token: https://dexscreener.com/ethereum/${swap.tokenAddress}\n` +
-          `Wallet: https://etherscan.io/address/${swap.trader}`,
+          `Tracked smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} just bought ${tokenLabel} (${ethPart}) ` +
+          `-- a dex-paid, low-mcap token -- confirmed on-chain.\n` +
+          `Token: ${dexscreenerUrl(swap.tokenAddress)}\n` +
+          `Wallet: ${explorerUrl(swap.trader)}`,
       });
     } else if (isSmartMoney) {
       emit({
@@ -195,20 +206,20 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
         signalType: "smart_money_buy",
         score: 75,
         message:
-          `📈 Smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} is buying ${tokenLabel} (${ethPart}) -- pending in mempool.\n` +
-          `Token: https://dexscreener.com/ethereum/${swap.tokenAddress}\n` +
-          `Wallet: https://etherscan.io/address/${swap.trader}`,
+          `📈 Smart-money wallet ${short(swap.trader)}${walletTrackRecord(swap.trader)} just bought ${tokenLabel} (${ethPart}) -- confirmed on-chain.\n` +
+          `Token: ${dexscreenerUrl(swap.tokenAddress)}\n` +
+          `Wallet: ${explorerUrl(swap.trader)}`,
       });
     } else if (hotToken) {
       emit({
         tokenAddress: swap.tokenAddress,
         walletAddress: swap.trader,
-        signalType: "early_mempool_buy",
+        signalType: "hot_token_buy",
         score: 55,
         message:
-          `👀 Buy pressure on dex-paid low-mcap token ${tokenLabel} (${ethPart}) from ${short(swap.trader)} -- pending in mempool.\n` +
+          `👀 Buy pressure on dex-paid low-mcap token ${tokenLabel} (${ethPart}) from ${short(swap.trader)} -- confirmed on-chain.\n` +
           `MCap: $${hotToken.marketCapUsd?.toLocaleString() ?? "?"} | Liquidity: $${hotToken.liquidityUsd?.toLocaleString() ?? "?"}\n` +
-          `Token: https://dexscreener.com/ethereum/${swap.tokenAddress}`,
+          `Token: ${dexscreenerUrl(swap.tokenAddress)}`,
       });
     }
   });
@@ -222,6 +233,6 @@ export function startSignalEngine(onSignal: (s: SignalRecord) => void): () => vo
     for (const timer of pendingFreshPairChecks) clearTimeout(timer);
     pendingFreshPairChecks.clear();
     stopNewPairWatcher();
-    stopMempoolWatcher();
+    stopSwapWatcher();
   };
 }

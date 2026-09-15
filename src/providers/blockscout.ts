@@ -1,9 +1,7 @@
 import { config } from "../config";
 import { fetchJson } from "../utils/http";
 
-const CHAIN_ID = 1;
-
-export interface EtherscanTx {
+export interface BlockscoutTx {
   hash: string;
   from: string;
   to: string;
@@ -14,14 +12,14 @@ export interface EtherscanTx {
   isError: string;
 }
 
-export interface EtherscanInternalTx {
+export interface BlockscoutInternalTx {
   hash: string;
   from: string;
   to: string;
   value: string; // wei
 }
 
-export interface EtherscanTokenTx {
+export interface BlockscoutTokenTx {
   hash: string;
   from: string;
   to: string;
@@ -32,15 +30,15 @@ export interface EtherscanTokenTx {
   timeStamp: string;
 }
 
-interface EtherscanListResponse<T> {
+interface BlockscoutListResponse<T> {
   status: string;
   message: string;
   result: T[] | string;
 }
 
-// Etherscan free tier is roughly 5 req/sec; stay comfortably under it.
+// Conservative default throttle for the free, keyless Blockscout API tier.
 let lastCallAt = 0;
-async function throttle(minGapMs = 220) {
+async function throttle(minGapMs = 250) {
   const wait = lastCallAt + minGapMs - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastCallAt = Date.now();
@@ -48,25 +46,21 @@ async function throttle(minGapMs = 220) {
 
 async function call<T>(params: Record<string, string>): Promise<T[]> {
   await throttle();
-  const qs = new URLSearchParams({
-    chainid: String(CHAIN_ID),
-    apikey: config.etherscan.apiKey,
-    ...params,
-  });
-  const data = await fetchJson<EtherscanListResponse<T>>(`${config.etherscan.baseUrl}?${qs}`);
+  const qs = new URLSearchParams(params);
+  const data = await fetchJson<BlockscoutListResponse<T>>(`${config.blockscout.baseUrl}?${qs}`);
   if (typeof data.result === "string") {
-    // Etherscan returns a string message (e.g. "No transactions found") on empty results.
+    // Etherscan-compatible APIs return a string message (e.g. "No transactions found") on empty results.
     return [];
   }
   return data.result;
 }
 
-/** Plain ETH transfer history for a wallet (used to estimate ETH spent/received around trades). */
+/** Plain native-ETH transfer history for a wallet (used to estimate ETH spent/received around trades). */
 export async function getNormalTransactions(
   address: string,
   opts: { startBlock?: number; endBlock?: number } = {}
-): Promise<EtherscanTx[]> {
-  return call<EtherscanTx>({
+): Promise<BlockscoutTx[]> {
+  return call<BlockscoutTx>({
     module: "account",
     action: "txlist",
     address,
@@ -80,8 +74,8 @@ export async function getNormalTransactions(
 export async function getTokenTransactions(
   address: string,
   contractAddress?: string
-): Promise<EtherscanTokenTx[]> {
-  return call<EtherscanTokenTx>({
+): Promise<BlockscoutTokenTx[]> {
+  return call<BlockscoutTokenTx>({
     module: "account",
     action: "tokentx",
     address,
@@ -91,8 +85,8 @@ export async function getTokenTransactions(
 }
 
 /** Internal (contract-to-EOA) ETH transfers for one transaction -- used to find ETH proceeds of a sell swap. */
-export async function getInternalTransactionsByHash(txHash: string): Promise<EtherscanInternalTx[]> {
-  return call<EtherscanInternalTx>({
+export async function getInternalTransactionsByHash(txHash: string): Promise<BlockscoutInternalTx[]> {
+  return call<BlockscoutInternalTx>({
     module: "account",
     action: "txlistinternal",
     txhash: txHash,
@@ -103,8 +97,8 @@ export async function getInternalTransactionsByHash(txHash: string): Promise<Eth
 export async function getEarliestTokenRecipients(
   tokenAddress: string,
   limit = 200
-): Promise<EtherscanTokenTx[]> {
-  const txs = await call<EtherscanTokenTx>({
+): Promise<BlockscoutTokenTx[]> {
+  return call<BlockscoutTokenTx>({
     module: "account",
     action: "tokentx",
     contractaddress: tokenAddress,
@@ -112,5 +106,4 @@ export async function getEarliestTokenRecipients(
     page: "1",
     offset: String(limit),
   });
-  return txs;
 }

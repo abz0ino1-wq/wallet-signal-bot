@@ -5,7 +5,7 @@ import {
   uniswapV2PairCreatedAbi,
   uniswapV3PoolCreatedAbi,
 } from "../decode/uniswapAbi";
-import { config } from "../config";
+import { getWeth } from "./weth";
 import { logger } from "../utils/logger";
 
 export interface NewPairEvent {
@@ -19,10 +19,11 @@ export interface NewPairEvent {
 
 /** The non-WETH side of a new pair, i.e. the token that just got a fresh market. */
 export function candidateTokenFromPair(ev: NewPairEvent): string | null {
+  const weth = getWeth();
   const t0 = ev.token0.toLowerCase();
   const t1 = ev.token1.toLowerCase();
-  if (t0 === config.weth) return t1;
-  if (t1 === config.weth) return t0;
+  if (t0 === weth) return t1;
+  if (t1 === weth) return t0;
   return null; // not WETH-paired -- harder to price, skip for now
 }
 

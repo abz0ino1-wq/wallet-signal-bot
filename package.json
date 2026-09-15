@@ -1,7 +1,7 @@
 {
   "name": "wallet-signal-bot",
   "version": "0.1.0",
-  "description": "Finds profitable Ethereum wallets, watches the mempool for their early trades, and alerts on low-market-cap dex-paid tokens via Telegram.",
+  "description": "Finds profitable wallets on Robinhood Chain, watches confirmed swaps in real time, and alerts on low-market-cap dex-paid/fresh-pair tokens via Telegram.",
   "private": true,
   "type": "commonjs",
   "engines": {
@@ -19,14 +19,12 @@
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
     "telegraf": "^4.16.3",
-    "viem": "^2.21.19",
-    "ws": "^8.18.0"
+    "viem": "^2.21.19"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.5.5",
     "@types/node-cron": "^3.0.11",
-    "@types/ws": "^8.5.12",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.2"
   }

@@ -1,8 +1,7 @@
 import { config } from "../config";
 import { tokensRepo, walletsRepo } from "../db";
 import { getBestPair } from "../providers/dexscreener";
-import { getEarliestTokenRecipients } from "../providers/etherscan";
-import { getTopProfitableWalletsPerToken } from "../providers/moralis";
+import { getEarliestTokenRecipients } from "../providers/blockscout";
 import { logger } from "../utils/logger";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -26,14 +25,10 @@ function addCandidateWallet(wallet: string, into: Set<string>) {
 
 /**
  * Scans recently-discovered tokens for ones that pumped (current mcap >=
- * minPumpMultiple x its mcap when first seen), then finds candidate wallets
- * to track for that token. When MORALIS_API_KEY is set, this uses Moralis'
- * top-profitable-wallets-per-token endpoint -- directly surfacing wallets
- * that were actually profitable on this token, which is strictly better
- * than a proxy signal. Falls back to pulling the token's earliest on-chain
- * recipients via Etherscan (the working theory there being that
- * consistently early buyers of pumps are worth tracking) when Moralis is
- * unset or returns nothing. Newly found candidates are persisted at
+ * minPumpMultiple x its mcap when first seen), then pulls the token's
+ * earliest on-chain recipients via Blockscout as candidate wallets to
+ * track -- the working theory being that consistently early buyers of
+ * pumps are worth tracking. Newly found candidates are persisted at
  * tier='candidate' pending scoring.
  */
 export async function discoverCandidateWallets(): Promise<string[]> {
@@ -60,15 +55,7 @@ export async function discoverCandidateWallets(): Promise<string[]> {
 
       if (multiple < config.discovery.minPumpMultiple) continue;
 
-      logger.info(`Discovery: ${token.address} pumped ${multiple.toFixed(1)}x -- finding candidate wallets.`);
-
-      const topProfitable = await getTopProfitableWalletsPerToken(token.address, { limit: 25 });
-      if (topProfitable && topProfitable.length > 0) {
-        for (const w of topProfitable) addCandidateWallet(w.walletAddress, newCandidates);
-        continue;
-      }
-
-      // Moralis unset/unavailable for this token -- fall back to earliest recipients.
+      logger.info(`Discovery: ${token.address} pumped ${multiple.toFixed(1)}x -- pulling early buyers.`);
       const recipients = await getEarliestTokenRecipients(token.address, 50);
       for (const tx of recipients) {
         const wallet = tx.to?.toLowerCase();

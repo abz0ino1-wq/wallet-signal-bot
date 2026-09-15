@@ -17,34 +17,30 @@ function requireEnv(name: string): string {
 
 export const config = {
   chain: {
-    id: 1,
-    name: "ethereum",
+    id: 4663,
+    name: "robinhood",
   },
   rpc: {
-    // Alchemy key is used to build WS/HTTP URLs unless explicit overrides are given.
+    // Alchemy officially supports Robinhood Chain; the exact subdomain
+    // wasn't independently verifiable from this environment, so this
+    // follows Alchemy's standard "<chain>-mainnet.g.alchemy.com" pattern.
+    // If your Alchemy dashboard shows a different URL for your Robinhood
+    // Chain app, set ALCHEMY_WS_URL/ALCHEMY_HTTP_URL explicitly and these
+    // are ignored.
     get wsUrl(): string {
       if (process.env.ALCHEMY_WS_URL) return process.env.ALCHEMY_WS_URL;
-      return `wss://eth-mainnet.g.alchemy.com/v2/${requireEnv("ALCHEMY_API_KEY")}`;
+      return `wss://robinhood-mainnet.g.alchemy.com/v2/${requireEnv("ALCHEMY_API_KEY")}`;
     },
     get httpUrl(): string {
       if (process.env.ALCHEMY_HTTP_URL) return process.env.ALCHEMY_HTTP_URL;
-      return `https://eth-mainnet.g.alchemy.com/v2/${requireEnv("ALCHEMY_API_KEY")}`;
+      return `https://robinhood-mainnet.g.alchemy.com/v2/${requireEnv("ALCHEMY_API_KEY")}`;
     },
   },
-  etherscan: {
-    get apiKey(): string {
-      return requireEnv("ETHERSCAN_API_KEY");
-    },
-    baseUrl: "https://api.etherscan.io/v2/api",
-  },
-  moralis: {
-    // Optional: unlocks USD-denominated, server-computed wallet PnL instead
-    // of the local Etherscan-calldata heuristic. Falls back automatically
-    // when unset or when a call fails.
-    get apiKey(): string | null {
-      return process.env.MORALIS_API_KEY || null;
-    },
-    baseUrl: "https://deep-index.moralis.io/api/v2.2",
+  blockscout: {
+    // Robinhood Chain's block explorer is Blockscout-based and exposes a
+    // free, keyless Etherscan-compatible API at this base URL (confirmed
+    // via viem's built-in chain definition).
+    baseUrl: process.env.BLOCKSCOUT_API_URL || "https://robinhoodchain.blockscout.com/api",
   },
   telegram: {
     get botToken(): string {
@@ -76,5 +72,10 @@ export const config = {
     minPumpMultiple: envInt("DISCOVERY_MIN_PUMP_MULTIPLE", 3),
     tokenSampleSize: envInt("DISCOVERY_TOKEN_SAMPLE_SIZE", 25),
   },
-  weth: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".toLowerCase(),
+  scanhood: {
+    baseUrl: process.env.SCANHOOD_API_URL || "https://api.scanhood.xyz",
+  },
+  // Optional override: skips the on-chain WETH() lookup at startup (see
+  // src/chain/weth.ts) if you already know the wrapped-native address.
+  wethOverride: process.env.WETH_ADDRESS?.toLowerCase() || null,
 } as const;

@@ -4,6 +4,7 @@ import { sendPlainMessage, sendSignalToTelegram } from "./telegram/bot";
 import { discoverCandidateWallets } from "./wallets/candidateDiscovery";
 import { walletsRepo } from "./db";
 import { scoreWallet } from "./wallets/walletScorer";
+import { resolveWeth } from "./chain/weth";
 import { logger } from "./utils/logger";
 
 async function runScoringPass() {
@@ -20,7 +21,9 @@ async function runScoringPass() {
 }
 
 async function main() {
-  logger.info("Starting wallet-signal-bot (Ethereum mainnet)...");
+  logger.info("Starting wallet-signal-bot (Robinhood Chain)...");
+
+  await resolveWeth();
 
   const stopSignalEngine = startSignalEngine((signal) => {
     sendSignalToTelegram(signal);
@@ -42,7 +45,7 @@ async function main() {
     runScoringPass().catch((err) => logger.error("Cron scoring pass failed:", err));
   });
 
-  await sendPlainMessage("✅ wallet-signal-bot is online and watching Ethereum mainnet.").catch(() => {
+  await sendPlainMessage("✅ wallet-signal-bot is online and watching Robinhood Chain.").catch(() => {
     logger.warn("Startup Telegram notification failed -- check TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.");
   });
 

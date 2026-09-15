@@ -1,14 +1,7 @@
 import { decodeFunctionData, formatEther, type Hex } from "viem";
-import { config } from "../config";
+import { getWeth } from "../chain/weth";
 import type { DecodedSwap } from "../types";
-import {
-  KNOWN_ROUTERS,
-  uniswapV2RouterAbi,
-  uniswapV3Router02Abi,
-  uniswapV3RouterAbi,
-} from "./uniswapAbi";
-
-const WETH = config.weth;
+import { KNOWN_ROUTERS, uniswapV2RouterAbi, uniswapV3Router02Abi } from "./uniswapAbi";
 
 /** Decodes a Uniswap V3 `path` bytes blob into its ordered list of token addresses. */
 function decodeV3Path(path: Hex): string[] {
@@ -26,16 +19,22 @@ function decodeV3Path(path: Hex): string[] {
   return tokens;
 }
 
-function nonWethToken(path: string[]): string | null {
-  return path.find((t) => t.toLowerCase() !== WETH) ?? null;
+function nonWethToken(path: string[], weth: string): string | null {
+  return path.find((t) => t.toLowerCase() !== weth) ?? null;
 }
 
 /**
- * Best-effort decode of a pending transaction's calldata into a WETH<->token
- * swap. Covers Uniswap V2 Router02 and V3 SwapRouter/SwapRouter02. Returns
- * null for calldata we don't recognize (e.g. Universal Router's packed
- * command encoding, other DEX routers, or non-swap calls) -- those are
- * simply skipped rather than mis-decoded.
+ * Best-effort decode of a transaction's calldata into a WETH<->token swap.
+ * Covers Uniswap V2 Router02 and V3 SwapRouter02 only. Returns null for
+ * calldata we don't recognize -- most importantly Universal Router's
+ * packed command encoding (`execute(bytes commands, bytes[] inputs, ...)`),
+ * which is the *preferred* entrypoint on Robinhood Chain per Uniswap's own
+ * docs. This means historical wallet-scoring (which replays a wallet's own
+ * past router calls) will undercount trades made via Universal Router --
+ * a real gap, documented in the README, not silently papered over. The
+ * live signal path doesn't have this gap: it watches confirmed Swap events
+ * directly (see chain/swapWatcher.ts) rather than decoding router calldata,
+ * so it sees every swap regardless of which router/entrypoint was used.
  */
 export function decodeSwap(params: {
   txHash: string;
@@ -47,6 +46,7 @@ export function decodeSwap(params: {
   const { txHash, from, to, input, valueWei } = params;
   if (!to) return null;
   const router = to.toLowerCase();
+  const weth = getWeth();
 
   try {
     if (router === KNOWN_ROUTERS.uniswapV2Router02) {
@@ -57,7 +57,7 @@ export function decodeSwap(params: {
         case "swapExactETHForTokens":
         case "swapETHForExactTokens": {
           const path = (args[1] as string[]).map((a) => a.toLowerCase());
-          const token = nonWethToken(path);
+          const token = nonWethToken(path, weth);
           if (!token) return null;
           return {
             txHash,
@@ -71,7 +71,7 @@ export function decodeSwap(params: {
         case "swapExactTokensForETH":
         case "swapTokensForExactETH": {
           const path = (args[2] as string[]).map((a) => a.toLowerCase());
-          const token = nonWethToken(path);
+          const token = nonWethToken(path, weth);
           if (!token) return null;
           return {
             txHash,
@@ -84,26 +84,25 @@ export function decodeSwap(params: {
         }
         case "swapExactTokensForTokens": {
           const path = (args[2] as string[]).map((a) => a.toLowerCase());
-          if (!path.includes(WETH)) return null; // not a WETH-denominated swap, skip
-          const token = nonWethToken(path);
+          if (!path.includes(weth)) return null; // not a WETH-denominated swap, skip
+          const token = nonWethToken(path, weth);
           if (!token) return null;
-          const side = path[0] === WETH ? "buy" : "sell";
+          const side = path[0] === weth ? "buy" : "sell";
           return { txHash, trader: from.toLowerCase(), tokenAddress: token, side, ethAmount: null, router };
         }
       }
       return null;
     }
 
-    if (router === KNOWN_ROUTERS.uniswapV3Router || router === KNOWN_ROUTERS.uniswapV3Router02) {
-      const abi = router === KNOWN_ROUTERS.uniswapV3Router ? uniswapV3RouterAbi : uniswapV3Router02Abi;
-      const decoded = decodeFunctionData({ abi, data: input });
+    if (router === KNOWN_ROUTERS.uniswapV3Router02) {
+      const decoded = decodeFunctionData({ abi: uniswapV3Router02Abi, data: input });
 
       if (decoded.functionName === "exactInputSingle") {
         const p = decoded.args[0] as { tokenIn: string; tokenOut: string; amountIn: bigint };
         const tokenIn = p.tokenIn.toLowerCase();
         const tokenOut = p.tokenOut.toLowerCase();
-        if (tokenIn !== WETH && tokenOut !== WETH) return null;
-        const side = tokenIn === WETH ? "buy" : "sell";
+        if (tokenIn !== weth && tokenOut !== weth) return null;
+        const side = tokenIn === weth ? "buy" : "sell";
         const token = side === "buy" ? tokenOut : tokenIn;
         return {
           txHash,
@@ -118,10 +117,10 @@ export function decodeSwap(params: {
       if (decoded.functionName === "exactInput") {
         const p = decoded.args[0] as { path: Hex; amountIn: bigint };
         const tokens = decodeV3Path(p.path);
-        if (!tokens.includes(WETH)) return null;
-        const token = nonWethToken(tokens);
+        if (!tokens.includes(weth)) return null;
+        const token = nonWethToken(tokens, weth);
         if (!token) return null;
-        const side = tokens[0] === WETH ? "buy" : "sell";
+        const side = tokens[0] === weth ? "buy" : "sell";
         return {
           txHash,
           trader: from.toLowerCase(),

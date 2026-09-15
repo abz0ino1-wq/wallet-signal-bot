@@ -1,15 +1,15 @@
 import { config } from "../config";
 import { tokensRepo } from "../db";
 import { getBestPair, getLatestBoostedTokens, getTopBoostedTokens } from "../providers/dexscreener";
-import { getTokenSafety } from "../providers/goplus";
+import { getTokenSafety } from "../providers/scanhood";
 import type { TokenRecord } from "../types";
 import { logger } from "../utils/logger";
 
 /**
  * "Dex paid" + low-market-cap token watchlist: pulls Dexscreener's boosted
- * (paid-promotion) token feed, filters to Ethereum mainnet tokens under the
+ * (paid-promotion) token feed, filters to this chain's tokens under the
  * configured market-cap/liquidity thresholds, and screens out obvious
- * scams/honeypots via GoPlus before a token is considered "hot" (i.e.
+ * scams/honeypots via ScanHood before a token is considered "hot" (i.e.
  * eligible to trigger signals).
  */
 export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
@@ -20,23 +20,23 @@ export async function refreshHotTokens(): Promise<Map<string, TokenRecord>> {
     getTopBoostedTokens().catch(() => []),
   ]);
 
-  const ethTokens = [...latest, ...top].filter((t) => t.chainId === "ethereum");
+  const chainTokens = [...latest, ...top].filter((t) => t.chainId === config.chain.name);
   const seen = new Set<string>();
   let skippedMcap = 0;
   let skippedLiquidity = 0;
   let skippedSafety = 0;
 
   logger.info(
-    `Hot tokens: fetched ${latest.length} latest-boosted + ${top.length} top-boosted (${ethTokens.length} on ethereum).`
+    `Hot tokens: fetched ${latest.length} latest-boosted + ${top.length} top-boosted (${chainTokens.length} on ${config.chain.name}).`
   );
 
-  for (const boosted of ethTokens) {
+  for (const boosted of chainTokens) {
     const address = boosted.tokenAddress.toLowerCase();
     if (seen.has(address)) continue;
     seen.add(address);
 
     try {
-      const pair = await getBestPair("ethereum", address);
+      const pair = await getBestPair(config.chain.name, address);
       const marketCapUsd = pair?.marketCap ?? pair?.fdv ?? null;
       const liquidityUsd = pair?.liquidity?.usd ?? null;
 

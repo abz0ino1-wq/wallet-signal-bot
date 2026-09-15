@@ -44,7 +44,7 @@ export interface WalletTrade {
 
 export type SignalType =
   | "smart_money_buy"
-  | "early_mempool_buy"
+  | "hot_token_buy"
   | "new_dex_paid_low_mcap"
   | "fresh_pair"
   | "composite";
