@@ -73,7 +73,7 @@ export const config = {
     tokenSampleSize: envInt("DISCOVERY_TOKEN_SAMPLE_SIZE", 25),
   },
   scanhood: {
-    baseUrl: process.env.SCANHOOD_API_URL || "https://api.scanhood.xyz",
+    baseUrl: process.env.SCANHOOD_API_URL || "https://scanhood.xyz",
   },
   // Optional override: skips the on-chain WETH() lookup at startup (see
   // src/chain/weth.ts) if you already know the wrapped-native address.

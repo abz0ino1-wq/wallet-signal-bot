@@ -11,37 +11,39 @@ export interface TokenSafety {
 }
 
 interface ScanHoodResponse {
-  verdict?: string; // expected: "PASS" | "CAUTION" | "DANGER"
-  is_honeypot?: boolean;
-  buy_tax_pct?: number;
-  sell_tax_pct?: number;
-  lp_locked?: boolean;
-  contract_verified?: boolean;
+  verdict?: string; // "PASS" | "CAUTION" | "DANGER"
+  sellable?: boolean; // honeypot buy+sell simulation result, right now
+  lp?: { status?: string; locked?: boolean };
+  lp_status?: string;
   flags?: string[];
   [key: string]: unknown;
 }
 
+// Confirmed via https://scanhood.xyz/llms.txt (ScanHood's own agent-oriented
+// API docs). Reasonable-citizen throttle per their "rate limits apply" note.
+let lastCallAt = 0;
+async function throttle(minGapMs = 500) {
+  const wait = lastCallAt + minGapMs - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCallAt = Date.now();
+}
+
 /**
  * GoPlus does not support Robinhood Chain (chain 4663 is explicitly
- * rejected), so this uses ScanHood -- a free, no-key scanner built
- * specifically for this chain that simulates an actual buy+sell round trip
- * on-chain to detect honeypots.
+ * rejected), so this uses ScanHood -- a free, no-key, open-source scanner
+ * built specifically for this chain that simulates an actual buy+sell round
+ * trip on-chain (real callStatic, not a heuristic) to detect honeypots, plus
+ * LP-lock status, contract verification, and deployer reputation.
  *
- * IMPORTANT: the exact request/response contract below is a best-effort
- * guess (this environment could not reach scanhood.xyz to verify it
- * directly). It fails SAFE: any error, unreachable endpoint, or
- * unrecognized response shape returns score 0 / isHoneypot true, so a
- * wrong guess here means "no fresh_pair alerts fire" rather than "unsafe
- * tokens get alerted anyway." If you see `scanhood_unverifiable` in the
- * logs consistently, that's this contract being wrong, not the tokens
- * being unsafe -- check scanhood.xyz's actual API docs and fix the URL
- * pattern / field names below (your VPS can reach it even though this dev
- * environment couldn't).
+ * `sellable: true` means the honeypot simulation passed *right now* -- per
+ * ScanHood's own docs, that's not a guarantee of future safety or a buy
+ * signal, just the best available real-time check on this chain.
  */
 export async function getTokenSafety(tokenAddress: string): Promise<TokenSafety> {
-  const url = `${config.scanhood.baseUrl}/v1/scan/${tokenAddress}`;
+  const url = `${config.scanhood.baseUrl}/api/scan?token=${tokenAddress}`;
 
   try {
+    await throttle();
     const data = await fetchJson<ScanHoodResponse>(url, { timeoutMs: 8_000, retries: 1 });
 
     if (typeof data.verdict !== "string") {
@@ -50,31 +52,23 @@ export async function getTokenSafety(tokenAddress: string): Promise<TokenSafety>
     }
 
     const verdict = data.verdict.toUpperCase();
-    const isHoneypot = data.is_honeypot === true || verdict === "DANGER";
-    const buyTaxPct = data.buy_tax_pct ?? 0;
-    const sellTaxPct = data.sell_tax_pct ?? 0;
+    const isHoneypot = data.sellable === false || verdict === "DANGER";
     const reasons: string[] = Array.isArray(data.flags) ? [...data.flags] : [];
 
     let score = verdict === "PASS" ? 90 : verdict === "CAUTION" ? 50 : 0;
-    if (data.lp_locked === false) {
+
+    const lpStatus = (data.lp?.status ?? data.lp_status ?? "").toLowerCase();
+    const lpLocked = data.lp?.locked ?? (lpStatus ? lpStatus.includes("lock") : null);
+    if (lpLocked === false) {
       score -= 15;
       reasons.push("lp_not_locked");
     }
-    if (data.contract_verified === false) {
-      score -= 15;
-      reasons.push("contract_not_verified");
-    }
-    if (buyTaxPct > 10) {
-      score -= 15;
-      reasons.push(`high_buy_tax_${buyTaxPct.toFixed(0)}pct`);
-    }
-    if (sellTaxPct > 10) {
-      score -= 20;
-      reasons.push(`high_sell_tax_${sellTaxPct.toFixed(0)}pct`);
-    }
+
     score = Math.max(0, Math.min(100, score));
 
-    return { score, reasons, isHoneypot, buyTaxPct, sellTaxPct };
+    // ScanHood's docs don't expose buy/sell tax as separate fields (unlike
+    // GoPlus) -- taxes would show up as CAUTION/DANGER flags instead.
+    return { score, reasons, isHoneypot, buyTaxPct: 0, sellTaxPct: 0 };
   } catch (err) {
     logger.warn(`ScanHood: request failed for ${tokenAddress}: ${(err as Error).message}`);
     return { score: 0, reasons: ["scanhood_unreachable"], isHoneypot: true, buyTaxPct: 0, sellTaxPct: 0 };

@@ -71,9 +71,9 @@ Fill in `.env`:
 
 | Variable | Where to get it | Notes |
 |---|---|---|
-| `ALCHEMY_API_KEY` | [alchemy.com](https://www.alchemy.com/) — create an app for **Robinhood Chain** | Needed for live factory-log and Swap-event subscriptions. Check the exact WS/HTTP URL your Alchemy dashboard shows for the Robinhood Chain app -- if it differs from the guessed `robinhood-mainnet.g.alchemy.com` pattern in `src/config.ts`, set `ALCHEMY_WS_URL`/`ALCHEMY_HTTP_URL` explicitly. |
+| `ALCHEMY_API_KEY` | [alchemy.com](https://www.alchemy.com/) — create an app for **Robinhood Chain** | Needed for live factory-log and Swap-event subscriptions. The `robinhood-mainnet.g.alchemy.com` URL pattern in `src/config.ts` is confirmed working. |
 | `BLOCKSCOUT_API_URL` | Optional, defaults to `https://robinhoodchain.blockscout.com/api` | Robinhood Chain's block explorer, Etherscan-API-compatible, free and keyless. |
-| `SCANHOOD_API_URL` | Optional, defaults to `https://api.scanhood.xyz` | Honeypot/rug check -- see the caveat below, this one needs verifying against the real API. |
+| `SCANHOOD_API_URL` | Optional, defaults to `https://scanhood.xyz` | Honeypot/rug check, confirmed against ScanHood's own agent-facing docs at `scanhood.xyz/llms.txt`. |
 | `TELEGRAM_BOT_TOKEN` | Message [@BotFather](https://t.me/BotFather), `/newbot` | |
 | `TELEGRAM_CHAT_ID` | Message your new bot once, then hit `https://api.telegram.org/bot<token>/getUpdates` and read `message.chat.id` | Can be your personal chat or a channel/group the bot is in. |
 
@@ -104,27 +104,24 @@ grow meaningfully.
 
 ## Design notes / honest limitations
 
-This chain launched ~2 months before this was built, so several pieces here
-are necessarily best-effort rather than fully verified — flagged explicitly
-rather than papered over:
+This chain launched ~2 months before this was built. The RPC endpoint and
+ScanHood's API contract were both confirmed working live (the former by
+successful WETH resolution + a live Swap-event stream at startup; the
+latter against `scanhood.xyz/llms.txt`, ScanHood's own agent-facing API
+docs) -- but a few things are still worth knowing:
 
-- **`ALCHEMY_API_KEY`'s URL pattern is a guess.** Alchemy officially
-  supports Robinhood Chain, but this environment couldn't independently
-  confirm the exact subdomain, so `src/config.ts` guesses
-  `robinhood-mainnet.g.alchemy.com` following Alchemy's naming convention
-  for other chains. Check your Alchemy dashboard when you create the app;
-  override via `ALCHEMY_WS_URL`/`ALCHEMY_HTTP_URL` if it's different.
-- **ScanHood's API contract (`src/providers/scanhood.ts`) is a best-effort
-  guess**, not verified against a live response — this dev environment
-  couldn't reach scanhood.xyz to confirm the endpoint path or response
-  field names. It fails *safe*: any error or unrecognized response treats
-  the token as unsafe (skips the alert) rather than the other way around,
-  so a wrong guess here means missing `fresh_pair`/`new_dex_paid_low_mcap`
-  alerts, not unsafe tokens slipping through. If you see
-  `scanhood_unreachable` or `scanhood_unverifiable` in the logs
-  consistently, that's this contract being wrong — check scanhood.xyz's
-  actual docs (reachable from your VPS, unlike this dev environment) and
-  fix the URL/field names.
+- **ScanHood doesn't expose separate buy/sell tax fields** (unlike GoPlus)
+  -- its `getTokenSafety()` always returns `buyTaxPct`/`sellTaxPct` as `0`;
+  taxes show up as CAUTION/DANGER flags in its `verdict` instead. The
+  `lp.status`/`lp_locked` field parsing in `src/providers/scanhood.ts` is
+  based on the docs' prose description, not a literal example response --
+  if `lp_not_locked` never shows up in reasons even for tokens you'd expect
+  it on, that field name may need adjusting.
+- **Fails safe by design**: any ScanHood error or unrecognized response
+  treats a token as unsafe (skips the alert) rather than the other way
+  around. If you see `scanhood_unreachable` or `scanhood_unverifiable` in
+  the logs *consistently* (not just an occasional timeout), something about
+  the contract has changed -- re-check `scanhood.xyz/llms.txt`.
 - **The wallet-scoring heuristic decodes V2 Router02 and V3 SwapRouter02
   calldata only.** It does *not* decode Universal Router calldata (packed
   command encoding) -- which is the *preferred* entrypoint on this chain
